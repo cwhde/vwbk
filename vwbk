@@ -351,11 +351,18 @@ EOF
     if [[ -z "$input_path" ]]; then
       read -p "Enter path to backup folder (.vwbk): " input_path </dev/tty
     fi
+    if [[ ! -e "$input_path" ]]; then
+      echo "Error: Input path '$input_path' does not exist." >&2
+      exit 1
+    fi
     # If it's a file inside a .vwbk folder, use the parent
-    if [[ ! -d "$input_path" && -f "$input_path" ]]; then
+    if [[ -f "$input_path" ]]; then
       parent="$(dirname "$input_path")"
       if [[ "$(basename "$parent")" == *.vwbk ]]; then
         input_path="$parent"
+      else
+        echo "Error: Input path '$input_path' is a file but not inside a .vwbk folder." >&2
+        exit 1
       fi
     fi
     if [[ ! -d "$input_path" ]]; then

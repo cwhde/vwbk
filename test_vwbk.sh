@@ -56,7 +56,7 @@ echo "$ERR" | grep -qi "private key" && pass "rejects .key" || fail "did not rej
 # 6. Decrypt rejects invalid path
 echo "--- 6. Decrypt invalid path ---"
 ERR=$(vwbk decrypt "${TEST_DIR}/nonexistent" "${TEST_DIR}/dec4" 2>&1 || true)
-echo "$ERR" | grep -q "not a directory\|not a valid\|missing" && pass "rejects bad path" || fail "did not reject bad path"
+echo "$ERR" | grep -q "does not exist\|not a directory\|not a valid\|missing" && pass "rejects bad path" || fail "did not reject bad path"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
