@@ -211,6 +211,7 @@ case "$subcommand" in
         echo "Error: Private key encryption with FIDO2 key failed." >&2
         exit 1
       fi
+      echo "$pubkey" > "${key_base}.pub"
       if [[ -n "$hw_identity" ]]; then
         echo "$hw_identity" > "${key_base}.passkey"
         echo "Keys successfully created:"
