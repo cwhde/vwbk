@@ -28,29 +28,40 @@ else
   OS_ID=$(uname -s | tr '[:upper:]' '[:lower:]')
 fi
 
+run_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif which sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "Error: This command requires root privileges but sudo is not installed and you are not root." >&2
+    exit 1
+  fi
+}
+
 install_debian_deps() {
   echo "Detected Debian/Ubuntu system."
   echo "Updating apt repositories..."
-  sudo apt-get update -y
+  run_cmd apt-get update -y
 
   echo "Installing system dependencies (pinned where possible)..."
   # Attempt pinned install, fallback if package version was updated in mirror
-  if ! sudo apt-get install -y bash="${DEB_BASH}" tar="${DEB_TAR}" gzip="${DEB_GZIP}" curl; then
+  if ! run_cmd apt-get install -y bash="${DEB_BASH}" tar="${DEB_TAR}" gzip="${DEB_GZIP}" curl; then
     echo "Warning: Pinned Debian package versions failed. Installing latest available..."
-    sudo apt-get install -y bash tar gzip curl
+    run_cmd apt-get install -y bash tar gzip curl
   fi
 }
 
 install_alpine_deps() {
   echo "Detected Alpine Linux system."
   echo "Updating apk repositories..."
-  sudo apk update
+  run_cmd apk update
 
   echo "Installing system dependencies (pinned where possible)..."
   # Attempt pinned install, fallback if package version was updated in mirror
-  if ! sudo apk add --no-cache bash="${APK_BASH}" tar="${APK_TAR}" gzip="${APK_GZIP}" curl; then
+  if ! run_cmd apk add --no-cache bash="${APK_BASH}" tar="${APK_TAR}" gzip="${APK_GZIP}" curl; then
     echo "Warning: Pinned Alpine package versions failed. Installing latest available..."
-    sudo apk add --no-cache bash tar gzip curl
+    run_cmd apk add --no-cache bash tar gzip curl
   fi
 }
 
