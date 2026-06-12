@@ -55,6 +55,11 @@ jobs:
           sed -i "s/VWBK_VERSION=\"DEV\"/VWBK_VERSION=\"$TAG_NAME\"/g" install.sh
           sed -i "s/VERSION=\"DEV\"/VERSION=\"$TAG_NAME\"/g" vwbk
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.21'
+
       - name: Create Gitea Release
         uses: https://gitea.com/actions/release-action@main
         with:
