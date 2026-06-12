@@ -294,10 +294,12 @@ case "$subcommand" in
       exit 1
     fi
 
-    # Detect key type from public key prefix
+    # Detect key type from public key prefix or file contents
     if echo "$pubkey_line" | grep -q 'age1yubikey1'; then
       key_type="yubikey"
     elif echo "$pubkey_line" | grep -q 'age1fido2'; then
+      key_type="fido2"
+    elif grep -q 'age-plugin-fido2-hmac' "$key_path"; then
       key_type="fido2"
     else
       key_type="password"
