@@ -234,23 +234,25 @@ install_fido2_plugin
 # 4. Download and Install vwbk script
 # Determine vwbk download URL
 if [ "$VWBK_VERSION" = "DEV" ]; then
+  VWBK_INSTALL_VERSION="main"
   if [ -f "./vwbk" ]; then
     echo "Local vwbk script found. Copying locally for dev install..."
     cp "./vwbk" "$USER_BIN_DIR/vwbk"
     chmod +x "$USER_BIN_DIR/vwbk"
-    echo "vwbk installed successfully to $USER_BIN_DIR/vwbk"
   else
     VWBK_URL="https://raw.githubusercontent.com/cwhde/vwbk/main/vwbk"
-    echo "Downloading vwbk ${VWBK_VERSION} from ${VWBK_URL}..."
+    echo "Downloading vwbk from ${VWBK_URL}..."
     if curl -sSfL "$VWBK_URL" -o "$USER_BIN_DIR/vwbk"; then
       chmod +x "$USER_BIN_DIR/vwbk"
-      echo "vwbk installed successfully to $USER_BIN_DIR/vwbk"
     else
       echo "Error: Failed to download vwbk script from $VWBK_URL" >&2
       exit 1
     fi
   fi
+  sed -i "s/^VERSION=\"DEV\"/VERSION=\"${VWBK_INSTALL_VERSION}\"/" "$USER_BIN_DIR/vwbk"
+  echo "vwbk installed successfully to $USER_BIN_DIR/vwbk (version: ${VWBK_INSTALL_VERSION})"
 else
+  VWBK_INSTALL_VERSION="$VWBK_VERSION"
   # Release mode: download from the specific release tag
   VWBK_URL="https://github.com/cwhde/vwbk/releases/download/${VWBK_VERSION}/vwbk"
   echo "Downloading vwbk ${VWBK_VERSION} from ${VWBK_URL}..."
@@ -292,7 +294,7 @@ echo "----------------------------------------"
 echo "Installation complete!"
 echo ""
 echo "Installed components:"
-echo "  vwbk:                    ${VWBK_VERSION}"
+echo "  vwbk:                    ${VWBK_INSTALL_VERSION}"
 echo "  age / age-keygen:        ${PINNED_AGE_VERSION}"
 echo "  age-plugin-yubikey:      ${PINNED_YUBIKEY_PLUGIN_VERSION}"
 echo "  age-plugin-fido2-hmac:   ${PINNED_FIDO2_PLUGIN_VERSION}"
