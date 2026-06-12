@@ -55,7 +55,7 @@ case "$subcommand" in
 
     # Interactive prompts for missing arguments
     if [[ -z "$filepath" ]]; then
-      read -p "Enter output path and name for the keys (e.g. ./mykeys): " filepath
+      read -p "Enter output path and name for the keys (e.g. ./mykeys): " filepath </dev/tty
     fi
 
     # Determine key output names
@@ -146,13 +146,16 @@ case "$subcommand" in
         exit 1
       fi
       echo "Running age-plugin-fido2-hmac enrollment (insert your FIDO2 key and touch it when prompted)..."
-      hardware_setup=$(age-plugin-fido2-hmac --enroll)
+      # -g is the correct flag for generating a new recipient/identity
+      hardware_setup=$(age-plugin-fido2-hmac -g)
       if [[ $? -ne 0 ]]; then
         echo "Error: age-plugin-fido2-hmac failed." >&2
         exit 1
       fi
-      hw_recipient=$(echo "$hardware_setup" | grep -o 'age1fido2[a-z0-9]*')
-      hw_identity=$(echo "$hardware_setup" | grep -v '^#')
+      # Public key line starts with '# public key:'
+      hw_recipient=$(echo "$hardware_setup" | grep '# public key:' | awk '{print $NF}')
+      # Identity line starts with AGE-PLUGIN-FIDO2-HMAC-
+      hw_identity=$(echo "$hardware_setup" | grep '^AGE-PLUGIN-FIDO2-HMAC-')
       if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
         echo "Error: Failed to obtain FIDO2 recipient/identity." >&2
         exit 1

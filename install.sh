@@ -290,10 +290,18 @@ fi
 
 echo "----------------------------------------"
 echo "Installation complete!"
+echo ""
+echo "Installed components:"
+echo "  vwbk:                    ${VWBK_VERSION}"
+echo "  age / age-keygen:        ${PINNED_AGE_VERSION}"
+echo "  age-plugin-yubikey:      ${PINNED_YUBIKEY_PLUGIN_VERSION}"
+echo "  age-plugin-fido2-hmac:   ${PINNED_FIDO2_PLUGIN_VERSION}"
 if [ "$PATH_UPDATED" = true ]; then
+  echo ""
   echo "Please restart your terminal or run:"
   echo "  source $PROFILE_FILE"
   echo "to update your PATH."
 else
+  echo ""
   echo "You can now run 'vwbk' directly."
 fi
