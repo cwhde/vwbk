@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Start pcscd daemon for smartcard/passkey support
+if which pcscd >/dev/null 2>&1; then
+  pcscd --hotplug &
+  sleep 0.5
+fi
+
 # docker-entrypoint.sh - Daemon loop for containerized vwbk backups
 # If a custom command is provided as arguments, execute it instead of running the daemon loop
 if [ $# -gt 0 ]; then

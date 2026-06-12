@@ -7,6 +7,9 @@ RUN apk update && \
     gzip=1.13-r0 \
     rclone=1.66.0-r5 \
     tar=1.35-r2 \
+    pcsc-lite=2.2.3-r0 \
+    ccid=1.5.5-r0 \
+    libfido2=1.14.0-r1 \
     curl
 
 # Install age v1.3.1 from official GitHub releases (multi-arch support)
@@ -23,6 +26,19 @@ RUN ARCH=$(uname -m) && \
     mv /tmp/age/age-keygen /usr/local/bin/age-keygen && \
     chmod +x /usr/local/bin/age /usr/local/bin/age-keygen && \
     rm -rf /tmp/age*
+
+# Install age plugins (YubiKey & FIDO2)
+RUN curl -sSfL "https://github.com/str4d/age-plugin-yubikey/releases/download/v0.5.0/age-plugin-yubikey-v0.5.0-x86_64-linux.tar.gz" -o /tmp/yubikey.tar.gz && \
+    tar -xzf /tmp/yubikey.tar.gz -C /tmp && \
+    mv /tmp/age-plugin-yubikey/age-plugin-yubikey /usr/local/bin/age-plugin-yubikey && \
+    chmod +x /usr/local/bin/age-plugin-yubikey && \
+    rm -rf /tmp/yubikey.tar.gz /tmp/age-plugin-yubikey && \
+    \
+    curl -sSfL "https://github.com/olastor/age-plugin-fido2-hmac/releases/download/v0.5.0/age-plugin-fido2-hmac-v0.5.0-linux-amd64.tar.gz" -o /tmp/fido2.tar.gz && \
+    tar -xzf /tmp/fido2.tar.gz -C /tmp && \
+    mv /tmp/age-plugin-fido2-hmac/age-plugin-fido2-hmac /usr/local/bin/age-plugin-fido2-hmac && \
+    chmod +x /usr/local/bin/age-plugin-fido2-hmac && \
+    rm -rf /tmp/fido2.tar.gz /tmp/age-plugin-fido2-hmac
 
 # Setup paths and copy files
 COPY vwbk /usr/local/bin/vwbk

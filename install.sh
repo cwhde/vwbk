@@ -6,22 +6,33 @@ VWBK_VERSION="DEV"
 
 # Target versions
 PINNED_AGE_VERSION="v1.3.1"
+PINNED_YUBIKEY_PLUGIN_VERSION="v0.5.0"
+PINNED_FIDO2_PLUGIN_VERSION="v0.5.0"
 
 # Debian targets
 DEB_BASH="5.2.37-2+b9"
 DEB_TAR="1.35+dfsg-3.1"
 DEB_GZIP="1.13-1"
+DEB_PCSCD="2.3.3-1"
+DEB_CCID="1.6.2-1"
+DEB_FIDO2="1.15.0-1+b1"
 
 # Alpine targets
 APK_BASH="5.2.26-r0"
 APK_TAR="1.35-r2"
 APK_GZIP="1.13-r0"
+APK_PCSCD="2.2.3-r0"
+APK_CCID="1.5.5-r0"
+APK_FIDO2="1.14.0-r1"
 
 # Fedora targets
 FEDORA_BASH="5.3.9-3.fc44"
 FEDORA_TAR="1.35-8.fc44"
 FEDORA_GZIP="1.14-2.fc44"
 FEDORA_CURL="8.18.0-6.fc44"
+FEDORA_PCSCD="2.4.1-2.fc44"
+FEDORA_CCID="1.7.1-2.fc44"
+FEDORA_FIDO2="1.16.0-5.fc44"
 
 echo "=== vwbk ${VWBK_VERSION} Installer ==="
 
@@ -52,9 +63,16 @@ install_debian_deps() {
 
   echo "Installing system dependencies (pinned where possible)..."
   # Attempt pinned install, fallback if package version was updated in mirror
-  if ! run_cmd apt-get install -y bash="${DEB_BASH}" tar="${DEB_TAR}" gzip="${DEB_GZIP}" curl; then
+  if ! run_cmd apt-get install -y bash="${DEB_BASH}" tar="${DEB_TAR}" gzip="${DEB_GZIP}" pcscd="${DEB_PCSCD}" libccid="${DEB_CCID}" libfido2-1="${DEB_FIDO2}" curl; then
     echo "Warning: Pinned Debian package versions failed. Installing latest available..."
-    run_cmd apt-get install -y bash tar gzip curl
+    run_cmd apt-get install -y bash tar gzip pcscd libccid libfido2-1 curl
+  fi
+
+  # Enable and start pcscd daemon (ignore if fails, e.g. in container)
+  if which systemctl >/dev/null 2>&1; then
+    run_cmd systemctl enable --now pcscd || true
+  elif [ -f /etc/init.d/pcscd ]; then
+    run_cmd service pcscd start || true
   fi
 }
 
@@ -65,9 +83,14 @@ install_alpine_deps() {
 
   echo "Installing system dependencies (pinned where possible)..."
   # Attempt pinned install, fallback if package version was updated in mirror
-  if ! run_cmd apk add --no-cache bash="${APK_BASH}" tar="${APK_TAR}" gzip="${APK_GZIP}" curl; then
+  if ! run_cmd apk add --no-cache bash="${APK_BASH}" tar="${APK_TAR}" gzip="${APK_GZIP}" pcsc-lite="${APK_PCSCD}" ccid="${APK_CCID}" libfido2="${APK_FIDO2}" curl; then
     echo "Warning: Pinned Alpine package versions failed. Installing latest available..."
-    run_cmd apk add --no-cache bash tar gzip curl
+    run_cmd apk add --no-cache bash tar gzip pcsc-lite ccid libfido2 curl
+  fi
+
+  if which rc-service >/dev/null 2>&1; then
+    run_cmd rc-update add pcscd default || true
+    run_cmd rc-service pcscd start || true
   fi
 }
 
@@ -75,9 +98,13 @@ install_fedora_deps() {
   echo "Detected Fedora system."
   echo "Installing system dependencies (pinned where possible)..."
   # Attempt pinned install, fallback if package version was updated in repo
-  if ! run_cmd dnf install -y bash-"${FEDORA_BASH}" tar-"${FEDORA_TAR}" gzip-"${FEDORA_GZIP}" curl-"${FEDORA_CURL}"; then
+  if ! run_cmd dnf install -y bash-"${FEDORA_BASH}" tar-"${FEDORA_TAR}" gzip-"${FEDORA_GZIP}" pcsc-lite-"${FEDORA_PCSCD}" pcsc-lite-ccid-"${FEDORA_CCID}" libfido2-"${FEDORA_FIDO2}" curl-"${FEDORA_CURL}"; then
     echo "Warning: Pinned Fedora package versions failed. Installing latest available..."
-    run_cmd dnf install -y bash tar gzip curl
+    run_cmd dnf install -y bash tar gzip pcsc-lite pcsc-lite-ccid libfido2 curl
+  fi
+
+  if which systemctl >/dev/null 2>&1; then
+    run_cmd systemctl enable --now pcscd || true
   fi
 }
 
@@ -101,6 +128,50 @@ USER_BIN_DIR="$HOME/.local/bin"
 mkdir -p "$USER_BIN_DIR"
 
 # 3. age and age-keygen Setup
+install_yubikey_plugin() {
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "x86_64" ]; then
+    echo "Downloading age-plugin-yubikey ${PINNED_YUBIKEY_PLUGIN_VERSION}..."
+    TEMP_DIR=$(mktemp -d)
+    TARBALL="age-plugin-yubikey-${PINNED_YUBIKEY_PLUGIN_VERSION}-x86_64-linux.tar.gz"
+    DOWNLOAD_URL="https://github.com/str4d/age-plugin-yubikey/releases/download/${PINNED_YUBIKEY_PLUGIN_VERSION}/${TARBALL}"
+
+    if curl -sSfL "$DOWNLOAD_URL" -o "${TEMP_DIR}/${TARBALL}"; then
+      tar -xzf "${TEMP_DIR}/${TARBALL}" -C "$TEMP_DIR"
+      mv "${TEMP_DIR}/age-plugin-yubikey/age-plugin-yubikey" "$USER_BIN_DIR/age-plugin-yubikey"
+      chmod +x "$USER_BIN_DIR/age-plugin-yubikey"
+      echo "Installed age-plugin-yubikey into $USER_BIN_DIR"
+    else
+      echo "Warning: Failed to download age-plugin-yubikey prebuilt binary." >&2
+    fi
+    rm -rf "$TEMP_DIR"
+  else
+    echo "Warning: No prebuilt age-plugin-yubikey binary available for ${ARCH}." >&2
+  fi
+}
+
+install_fido2_plugin() {
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "x86_64" ]; then
+    echo "Downloading age-plugin-fido2-hmac ${PINNED_FIDO2_PLUGIN_VERSION}..."
+    TEMP_DIR=$(mktemp -d)
+    TARBALL="age-plugin-fido2-hmac-${PINNED_FIDO2_PLUGIN_VERSION}-linux-amd64.tar.gz"
+    DOWNLOAD_URL="https://github.com/olastor/age-plugin-fido2-hmac/releases/download/${PINNED_FIDO2_PLUGIN_VERSION}/${TARBALL}"
+
+    if curl -sSfL "$DOWNLOAD_URL" -o "${TEMP_DIR}/${TARBALL}"; then
+      tar -xzf "${TEMP_DIR}/${TARBALL}" -C "$TEMP_DIR"
+      mv "${TEMP_DIR}/age-plugin-fido2-hmac/age-plugin-fido2-hmac" "$USER_BIN_DIR/age-plugin-fido2-hmac"
+      chmod +x "$USER_BIN_DIR/age-plugin-fido2-hmac"
+      echo "Installed age-plugin-fido2-hmac into $USER_BIN_DIR"
+    else
+      echo "Warning: Failed to download age-plugin-fido2-hmac prebuilt binary." >&2
+    fi
+    rm -rf "$TEMP_DIR"
+  else
+    echo "Warning: No prebuilt age-plugin-fido2-hmac binary available for ${ARCH}." >&2
+  fi
+}
+
 install_age_binary() {
   ARCH=$(uname -m)
   case "$ARCH" in
@@ -155,6 +226,10 @@ fi
 if [ "$NEED_AGE_INSTALL" = true ]; then
   install_age_binary
 fi
+
+# 3b. Install age plugins (YubiKey & FIDO2)
+install_yubikey_plugin
+install_fido2_plugin
 
 # 4. Download and Install vwbk script
 # Determine vwbk download URL
