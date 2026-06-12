@@ -194,12 +194,15 @@ case "$subcommand" in
         echo "Error: age-plugin-fido2-hmac failed." >&2
         exit 1
       fi
+      echo "Plugin output:"
+      echo "$hardware_setup"
+      echo ""
       # Public key line starts with '# public key:'
       hw_recipient=$(echo "$hardware_setup" | grep '# public key:' | awk '{print $NF}')
-      # Identity line starts with AGE-PLUGIN-FIDO2-HMAC-
+      # Identity line starts with AGE-PLUGIN-FIDO2-HMAC- (only present if user chose separate identity)
       hw_identity=$(echo "$hardware_setup" | grep '^AGE-PLUGIN-FIDO2-HMAC-')
-      if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
-        echo "Error: Failed to obtain FIDO2 recipient/identity." >&2
+      if [[ -z "$hw_recipient" ]]; then
+        echo "Error: Failed to obtain FIDO2 recipient (public key)." >&2
         exit 1
       fi
       echo "Encrypting post-quantum private key using FIDO2 recipient..."
@@ -208,12 +211,21 @@ case "$subcommand" in
         echo "Error: Private key encryption with FIDO2 key failed." >&2
         exit 1
       fi
-      echo "$hw_identity" > "${key_base}.passkey"
-      echo "$pubkey" > "${key_base}.pub"
-      echo "Keys successfully created:"
-      echo "  Private key (FIDO2-encrypted): ${key_base}.key"
-      echo "  FIDO2 identity reference: ${key_base}.passkey"
-      echo "  Public key: ${key_base}.pub"
+      if [[ -n "$hw_identity" ]]; then
+        echo "$hw_identity" > "${key_base}.passkey"
+        echo "Keys successfully created:"
+        echo "  Private key (FIDO2-encrypted): ${key_base}.key"
+        echo "  FIDO2 identity reference: ${key_base}.passkey"
+        echo "  Public key: ${key_base}.pub"
+      else
+        echo "Keys successfully created:"
+        echo "  Private key (FIDO2-encrypted): ${key_base}.key"
+        echo "  Public key: ${key_base}.pub"
+        echo ""
+        echo "  No identity file was created (you chose separate identity: no)."
+        echo "  To decrypt, run: vwbk decrypt <backup> <output>"
+        echo "  You will be prompted to touch your FIDO2 key during decryption."
+      fi
 
     else
       echo "Error: Unknown mode '${mode}'. Use password, yubikey, or fido2." >&2
@@ -425,15 +437,14 @@ EOF
           exit 1
         fi
         passkey_file="${key_path%.key}.passkey"
-        if [[ ! -f "$passkey_file" ]]; then
-          read -p "Enter FIDO2 identity file path (.passkey): " passkey_file </dev/tty
+        if [[ -f "$passkey_file" ]]; then
+          echo "Decrypting with FIDO2 passkey (touch your security key when prompted)..."
+          age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        else
+          echo "No .passkey file found. Decrypting with FIDO2 token directly..."
+          echo "You will need to insert your FIDO2 key and touch it when prompted."
+          age -d -j fido2-hmac -o - "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         fi
-        if [[ ! -f "$passkey_file" ]]; then
-          echo "Error: FIDO2 identity file '$passkey_file' not found." >&2
-          exit 1
-        fi
-        echo "Decrypting with FIDO2 passkey (touch your security key when prompted)..."
-        age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         pipe_status=("${PIPESTATUS[@]}")
         ;;
 
