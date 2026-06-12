@@ -91,7 +91,7 @@ case "$subcommand" in
 
     # Parse keys
     pubkey=$(echo "$keys" | grep -o 'age1[a-z0-9]*')
-    secretkey=$(echo "$keys" | grep -v '^#')
+    secretkey=$(echo "$keys" | grep '^AGE-SECRET-KEY-')
 
     if [[ -z "$pubkey" || -z "$secretkey" ]]; then
       echo "Error: Failed to parse generated keypair." >&2
@@ -116,13 +116,16 @@ case "$subcommand" in
         exit 1
       fi
       echo "Running age-plugin-yubikey configuration (insert your YubiKey)..."
-      hardware_setup=$(age-plugin-yubikey)
+      # --generate prints identity to stdout (the interactive TUI writes to a file instead)
+      hardware_setup=$(age-plugin-yubikey --generate)
       if [[ $? -ne 0 ]]; then
         echo "Error: age-plugin-yubikey failed." >&2
         exit 1
       fi
+      # Recipient line contains age1yubikey1...
       hw_recipient=$(echo "$hardware_setup" | grep -o 'age1yubikey1[a-z0-9]*')
-      hw_identity=$(echo "$hardware_setup" | grep -v '^#')
+      # Identity line starts with AGE-PLUGIN-YUBIKEY-
+      hw_identity=$(echo "$hardware_setup" | grep '^AGE-PLUGIN-YUBIKEY-')
       if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
         echo "Error: Failed to obtain YubiKey recipient/identity." >&2
         exit 1
@@ -191,7 +194,7 @@ case "$subcommand" in
 
     # Prompts for missing args
     if [[ -z "$key_path" ]]; then
-      read -p "Enter public key file path (.pub): " key_path
+      read -p "Enter public key file path (.pub): " key_path </dev/tty
     fi
     if [[ ! -f "$key_path" ]]; then
       if [[ -f "${key_path}.pub" ]]; then
@@ -203,7 +206,7 @@ case "$subcommand" in
     fi
 
     if [[ -z "$input_path" ]]; then
-      read -p "Enter input folder or file path: " input_path
+      read -p "Enter input folder or file path: " input_path </dev/tty
     fi
     if [[ ! -e "$input_path" ]]; then
       echo "Error: Input path '$input_path' does not exist." >&2
@@ -211,7 +214,7 @@ case "$subcommand" in
     fi
 
     if [[ -z "$output_folder" ]]; then
-      read -p "Enter output folder path: " output_folder
+      read -p "Enter output folder path: " output_folder </dev/tty
     fi
     mkdir -p "$output_folder"
 
@@ -416,7 +419,7 @@ EOF
     if [[ $# -ge 1 ]]; then backup_path="$1"; fi
 
     if [[ -z "$backup_path" ]]; then
-      read -p "Enter backup folder path (.vwbk): " backup_path
+      read -p "Enter backup folder path (.vwbk): " backup_path </dev/tty
     fi
 
     if [[ ! -d "$backup_path" ]]; then
