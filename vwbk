@@ -16,8 +16,11 @@ Usage:
   vwbk encrypt [key_path] [input_path] [output_folder]
     Tar, compress, and encrypt a file/folder with a public key.
 
-  vwbk decrypt [key_path] [input_path] [output_folder]
-    Decrypt and extract a backup using the corresponding private key.
+  vwbk decrypt [input_path] [output_folder] [key_path]
+    Decrypt and extract a backup. key_path is optional:
+      - If provided, decrypts using the password-encrypted .key file.
+      - If omitted, interactively asks whether to use a password key,
+        a YubiKey passkey, or a FIDO2 passkey.
 
   vwbk inspect [backup_folder]
     Show metadata for a given backup.
@@ -202,10 +205,21 @@ case "$subcommand" in
     backup_dir="${output_folder}/${timestamp}-${key_name}.vwbk"
     mkdir -p "$backup_dir"
 
+    # Detect key type from public key prefix
+    pubkey_content=$(cat "$key_path")
+    if echo "$pubkey_content" | grep -q 'age1yubikey1'; then
+      key_type="yubikey"
+    elif echo "$pubkey_content" | grep -q 'age1fido2'; then
+      key_type="fido2"
+    else
+      key_type="password"
+    fi
+
     meta_file="${backup_dir}/meta.txt"
     cat <<EOF > "$meta_file"
 vwbk_version: ${VERSION}
 key_name: ${key_name}
+key_type: ${key_type}
 timestamp: ${timestamp}
 original_path: $(realpath "$input_path")
 EOF
@@ -234,28 +248,18 @@ EOF
 
   decrypt)
     shift
-    key_path=""
     input_path=""
     output_folder=""
+    key_path=""
 
-    if [[ $# -ge 1 ]]; then key_path="$1"; fi
-    if [[ $# -ge 2 ]]; then input_path="$2"; fi
-    if [[ $# -ge 3 ]]; then output_folder="$3"; fi
+    # New arg order: [input_path] [output_folder] [key_path]
+    if [[ $# -ge 1 ]]; then input_path="$1"; fi
+    if [[ $# -ge 2 ]]; then output_folder="$2"; fi
+    if [[ $# -ge 3 ]]; then key_path="$3"; fi
 
-    if [[ -z "$key_path" ]]; then
-      read -p "Enter private key file path (.key): " key_path
-    fi
-    if [[ ! -f "$key_path" ]]; then
-      if [[ -f "${key_path}.key" ]]; then
-        key_path="${key_path}.key"
-      else
-        echo "Error: Private key file '$key_path' not found." >&2
-        exit 1
-      fi
-    fi
-
+    # Prompt for input backup path
     if [[ -z "$input_path" ]]; then
-      read -p "Enter path to backup folder (.vwbk): " input_path
+      read -p "Enter path to backup folder (.vwbk): " input_path </dev/tty
     fi
     if [[ ! -d "$input_path" ]]; then
       if [[ -f "$input_path" && "$(basename "$(dirname "$input_path")")" == *.vwbk ]]; then
@@ -266,28 +270,122 @@ EOF
       fi
     fi
 
+    # Prompt for output folder
     if [[ -z "$output_folder" ]]; then
-      read -p "Enter destination output folder: " output_folder
+      read -p "Enter destination output folder: " output_folder </dev/tty
     fi
     mkdir -p "$output_folder"
 
-    # Check for companion passkey
-    passkey_path="${key_path%.key}.passkey"
-
-    if [[ -f "$passkey_path" ]]; then
-      echo "Decrypting post-quantum key with passkey identity..."
-      decrypted_key=$(age -d -i "$passkey_path" "$key_path" 2>/dev/null)
-      if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to decrypt post-quantum key with passkey plugin." >&2
-        exit 1
-      fi
-      echo "$decrypted_key" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+    # Determine decrypt mode: if key_path given, use password flow.
+    # Otherwise, read key_type from meta.txt or ask interactively.
+    if [[ -n "$key_path" ]]; then
+      decrypt_mode="password"
     else
-      echo "Decrypting backup with password-encrypted private key..."
-      age -d -i "$key_path" -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+      # Try to read key_type from meta.txt
+      meta_key_type=""
+      if [[ -f "${input_path}/meta.txt" ]]; then
+        meta_key_type=$(grep '^key_type:' "${input_path}/meta.txt" | awk '{print $2}')
+      fi
+
+      if [[ -n "$meta_key_type" ]]; then
+        decrypt_mode="$meta_key_type"
+        echo "Detected key type from backup metadata: ${decrypt_mode}"
+      else
+        # Interactive selection
+        echo "No key path provided. How was this backup encrypted?" >/dev/tty
+        echo "  1) Password-encrypted key file (.key)" >/dev/tty
+        echo "  2) YubiKey hardware passkey" >/dev/tty
+        echo "  3) FIDO2 hardware passkey" >/dev/tty
+        while true; do
+          read -p "Select decryption method [1/2/3]: " choice </dev/tty
+          case "$choice" in
+            1) decrypt_mode="password"; break ;;
+            2) decrypt_mode="yubikey";  break ;;
+            3) decrypt_mode="fido2";    break ;;
+            *) echo "Please enter 1, 2, or 3." >/dev/tty ;;
+          esac
+        done
+      fi
     fi
 
-    if [[ ${PIPESTATUS[0]} -eq 0 && ${PIPESTATUS[1]} -eq 0 ]]; then
+    # Execute the appropriate decryption flow
+    case "$decrypt_mode" in
+      password)
+        if [[ -z "$key_path" ]]; then
+          read -p "Enter private key file path (.key): " key_path </dev/tty
+        fi
+        if [[ ! -f "$key_path" ]]; then
+          if [[ -f "${key_path}.key" ]]; then
+            key_path="${key_path}.key"
+          else
+            echo "Error: Private key file '$key_path' not found." >&2
+            exit 1
+          fi
+        fi
+        echo "Decrypting backup with password-encrypted private key..."
+        age -d -i "$key_path" -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        pipe_status=("${PIPESTATUS[@]}")
+        ;;
+
+      yubikey)
+        if ! which age-plugin-yubikey >/dev/null 2>&1; then
+          echo "Error: age-plugin-yubikey is not installed." >&2
+          exit 1
+        fi
+        if [[ -z "$key_path" ]]; then
+          read -p "Enter encrypted private key file path (.key): " key_path </dev/tty
+        fi
+        if [[ ! -f "$key_path" ]]; then
+          echo "Error: Private key file '$key_path' not found." >&2
+          exit 1
+        fi
+        # Check for companion .passkey identity file
+        passkey_file="${key_path%.key}.passkey"
+        if [[ ! -f "$passkey_file" ]]; then
+          read -p "Enter YubiKey identity file path (.passkey): " passkey_file </dev/tty
+        fi
+        if [[ ! -f "$passkey_file" ]]; then
+          echo "Error: YubiKey identity file '$passkey_file' not found." >&2
+          exit 1
+        fi
+        echo "Decrypting with YubiKey passkey (touch your key when prompted)..."
+        # age-plugin-yubikey needs an interactive TTY; run age with /dev/tty as stdin
+        age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        pipe_status=("${PIPESTATUS[@]}")
+        ;;
+
+      fido2)
+        if ! which age-plugin-fido2-hmac >/dev/null 2>&1; then
+          echo "Error: age-plugin-fido2-hmac is not installed." >&2
+          exit 1
+        fi
+        if [[ -z "$key_path" ]]; then
+          read -p "Enter encrypted private key file path (.key): " key_path </dev/tty
+        fi
+        if [[ ! -f "$key_path" ]]; then
+          echo "Error: Private key file '$key_path' not found." >&2
+          exit 1
+        fi
+        passkey_file="${key_path%.key}.passkey"
+        if [[ ! -f "$passkey_file" ]]; then
+          read -p "Enter FIDO2 identity file path (.passkey): " passkey_file </dev/tty
+        fi
+        if [[ ! -f "$passkey_file" ]]; then
+          echo "Error: FIDO2 identity file '$passkey_file' not found." >&2
+          exit 1
+        fi
+        echo "Decrypting with FIDO2 passkey (touch your security key when prompted)..."
+        age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        pipe_status=("${PIPESTATUS[@]}")
+        ;;
+
+      *)
+        echo "Error: Unknown decryption mode '${decrypt_mode}'." >&2
+        exit 1
+        ;;
+    esac
+
+    if [[ ${pipe_status[0]} -eq 0 && ${pipe_status[1]} -eq 0 ]]; then
       echo "Backup successfully decrypted to: $output_folder"
       cp "${input_path}/meta.txt" "${output_folder}/vwbk-meta.txt"
     else

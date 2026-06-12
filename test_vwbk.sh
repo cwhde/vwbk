@@ -65,8 +65,8 @@ echo "Testing: vwbk decrypt"
 DEC_DIR="${TEST_DIR}/dec"
 mkdir -p "$DEC_DIR"
 
-# Run decrypt
-vwbk decrypt "${KEY_PATH}.key" "$BACKUP_DIR" "$DEC_DIR" <<< 'testpassword123'
+# Run decrypt (new arg order: input_path output_folder key_path)
+vwbk decrypt "$BACKUP_DIR" "$DEC_DIR" "${KEY_PATH}.key" <<< 'testpassword123'
 
 # Verify decrypted contents
 if [[ -f "${DEC_DIR}/src/file1.txt" && -f "${DEC_DIR}/src/file2.txt" && -f "${DEC_DIR}/vwbk-meta.txt" ]]; then
