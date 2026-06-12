@@ -234,22 +234,33 @@ install_fido2_plugin
 # 4. Download and Install vwbk script
 # Determine vwbk download URL
 if [ "$VWBK_VERSION" = "DEV" ]; then
-  VWBK_INSTALL_VERSION="main"
-  if [ -f "./vwbk" ]; then
-    echo "Local vwbk script found. Copying locally for dev install..."
-    cp "./vwbk" "$USER_BIN_DIR/vwbk"
-    chmod +x "$USER_BIN_DIR/vwbk"
-  else
-    VWBK_URL="https://raw.githubusercontent.com/cwhde/vwbk/main/vwbk"
+  # Installer from main branch: fetch the latest release version from GitHub API
+  echo "Detecting latest vwbk release from GitHub..."
+  LATEST_TAG=$(curl -sSfL https://api.github.com/repos/cwhde/vwbk/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+  if [ -n "$LATEST_TAG" ]; then
+    VWBK_INSTALL_VERSION="$LATEST_TAG"
+    VWBK_URL="https://github.com/cwhde/vwbk/releases/download/${LATEST_TAG}/vwbk"
+    echo "Latest release: ${LATEST_TAG}"
     echo "Downloading vwbk from ${VWBK_URL}..."
     if curl -sSfL "$VWBK_URL" -o "$USER_BIN_DIR/vwbk"; then
       chmod +x "$USER_BIN_DIR/vwbk"
     else
-      echo "Error: Failed to download vwbk script from $VWBK_URL" >&2
+      echo "Error: Failed to download vwbk from release ${LATEST_TAG}" >&2
+      exit 1
+    fi
+  else
+    # Fallback: no network or API failed, use local script if present
+    if [ -f "./vwbk" ]; then
+      echo "Could not detect latest release. Using local vwbk script..."
+      cp "./vwbk" "$USER_BIN_DIR/vwbk"
+      chmod +x "$USER_BIN_DIR/vwbk"
+      VWBK_INSTALL_VERSION="dev"
+      sed -i "s/^VERSION=\"DEV\"/VERSION=\"${VWBK_INSTALL_VERSION}\"/" "$USER_BIN_DIR/vwbk"
+    else
+      echo "Error: Could not detect latest release and no local vwbk found." >&2
       exit 1
     fi
   fi
-  sed -i "s/^VERSION=\"DEV\"/VERSION=\"${VWBK_INSTALL_VERSION}\"/" "$USER_BIN_DIR/vwbk"
   echo "vwbk installed successfully to $USER_BIN_DIR/vwbk (version: ${VWBK_INSTALL_VERSION})"
 else
   VWBK_INSTALL_VERSION="$VWBK_VERSION"
