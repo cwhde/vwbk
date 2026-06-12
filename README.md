@@ -141,4 +141,4 @@ To ensure that you can read your backups decades in the future, follow these ins
 
 ## License
 
-This project is licensed under the **BSD 3-Clause License** - see the [LICENSE](LICENSE) file for details (matching `github.com/cwhde/cs-RSA`).
+This project is licensed under the **BSD 3-Clause License** - see the [LICENSE](LICENSE) file for details.

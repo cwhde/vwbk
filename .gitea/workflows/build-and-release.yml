@@ -19,9 +19,6 @@ jobs:
           sed -i "s/VWBK_VERSION=\"DEV\"/VWBK_VERSION=\"$TAG_NAME\"/g" install.sh
           sed -i "s/VERSION=\"DEV\"/VERSION=\"$TAG_NAME\"/g" vwbk
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -40,7 +37,7 @@ jobs:
           tags: |
             git.juzo.io/juzo/vwbk:latest
             git.juzo.io/juzo/vwbk:${{ github.ref_name }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
   create-gitea-release:
     runs-on: ubuntu-latest
