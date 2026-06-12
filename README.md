@@ -21,7 +21,7 @@ The installer automatically detects Debian-based and Alpine-based systems, insta
 
 To install the latest release, run:
 ```bash
-curl -sSfL https://github.com/cwhde/vwbk/releases/download/v1.0.0/install.sh | bash
+curl -sSfL https://github.com/cwhde/vwbk/releases/download/v1.0/install.sh | bash
 ```
 
 To install from the master branch directly:
@@ -126,12 +126,12 @@ services:
 
 ### decrypting 10 Years from Now
 To ensure that you can read your backups decades in the future, follow these instructions:
-1. Locate the `vwbk_version` in the plaintext `meta.txt` file of the backup directory (e.g. `v1.0.0`).
+1. Locate the `vwbk_version` in the plaintext `meta.txt` file of the backup directory (e.g. `v1.0`).
 2. Run the `install.sh` matching that specific version tag:
    ```bash
-   curl -sSfL https://github.com/cwhde/vwbk/releases/download/v1.0.0/install.sh | bash
+   curl -sSfL https://github.com/cwhde/vwbk/releases/download/v1.0/install.sh | bash
    ```
-   This will download the exact corresponding version of the `vwbk` script and pin all system components to the validated `v1.0.0` configuration.
+   This will download the exact corresponding version of the `vwbk` script and pin all system components to the validated `v1.0` configuration.
 3. Perform standard decryption:
    ```bash
    vwbk decrypt /path/to/private.key /path/to/backup.vwbk /path/to/restore
