@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+
+# vwbk - Bash-based Backup and Encryption Utility using post-quantum age
+# Version: DEV (replaces with release tag in CI/CD)
+VERSION="DEV"
+
+show_help() {
+  cat <<EOF
+vwbk ${VERSION} - Post-Quantum age Backup Utility
+
+Usage:
+  vwbk enroll [filepath] [mode]
+    Create an age identity with a public and password/passkey-encrypted private key.
+    mode: password | passkey
+
+  vwbk encrypt [key_path] [input_path] [output_folder]
+    Tar, compress, and encrypt a file/folder with a public key.
+
+  vwbk decrypt [key_path] [input_path] [output_folder]
+    Decrypt and extract a backup using the corresponding private key.
+
+  vwbk inspect [backup_folder]
+    Show metadata for a given backup.
+
+  vwbk help
+    Show this help message.
+EOF
+}
+
+# Subcommands routing
+if [[ $# -lt 1 ]]; then
+  show_help
+  exit 1
+fi
+
+subcommand="$1"
+
+case "$subcommand" in
+  enroll)
+    shift
+    filepath=""
+    mode=""
+
+    # Parse arguments
+    for arg in "$@"; do
+      if [[ "$arg" == "password" || "$arg" == "passkey" ]]; then
+        mode="$arg"
+      else
+        filepath="$arg"
+      fi
+    done
+
+    # Interactive prompts for missing arguments
+    if [[ -z "$filepath" ]]; then
+      read -p "Enter output path and name for the keys (e.g. ./mykeys): " filepath
+    fi
+
+    # Determine key output names
+    if [[ "$filepath" == */ || -z "$filepath" ]]; then
+      if [[ -z "$filepath" ]]; then
+        filepath="./"
+      fi
+      mkdir -p "$filepath"
+      key_base="${filepath%/}/identity"
+    else
+      dir_name=$(dirname "$filepath")
+      mkdir -p "$dir_name"
+      key_base="$filepath"
+    fi
+
+    if [[ -z "$mode" ]]; then
+      while true; do
+        read -p "Select enrollment mode (password/passkey): " mode
+        if [[ "$mode" == "password" || "$mode" == "passkey" ]]; then
+          break
+        fi
+        echo "Invalid mode. Please enter 'password' or 'passkey'."
+      done
+    fi
+
+    # Generate keypair using age-keygen -pq
+    echo "Generating post-quantum age keypair..."
+    keys=$(age-keygen -pq 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+      echo "Error: age-keygen -pq failed. Ensure age >= v1.3.0 is installed." >&2
+      exit 1
+    fi
+
+    # Parse keys
+    pubkey=$(echo "$keys" | grep -o 'age1[a-z0-9]*')
+    secretkey=$(echo "$keys" | grep -v '^#')
+
+    if [[ -z "$pubkey" || -z "$secretkey" ]]; then
+      echo "Error: Failed to parse generated keypair." >&2
+      exit 1
+    fi
+
+    if [[ "$mode" == "password" ]]; then
+      echo "Encrypting private key with password..."
+      # age -p prompts interactively for passphrase double-entry
+      echo "$secretkey" | age -p -o "${key_base}.key"
+      if [[ $? -ne 0 ]]; then
+        echo "Error: Encryption of private key failed." >&2
+        exit 1
+      fi
+      echo "$pubkey" > "${key_base}.pub"
+      echo "Keys successfully created:"
+      echo "  Private key (encrypted): ${key_base}.key"
+      echo "  Public key: ${key_base}.pub"
+
+    elif [[ "$mode" == "passkey" ]]; then
+      echo "Detecting passkey/security key plugin..."
+      hw_recipient=""
+      hw_identity=""
+
+      if which age-plugin-yubikey >/dev/null 2>&1; then
+        echo "Found age-plugin-yubikey. Running configuration..."
+        hardware_setup=$(age-plugin-yubikey)
+        if [[ $? -ne 0 ]]; then
+          echo "Error: age-plugin-yubikey failed." >&2
+          exit 1
+        fi
+        hw_recipient=$(echo "$hardware_setup" | grep -o 'age1yubikey1[a-z0-9]*')
+        hw_identity=$(echo "$hardware_setup" | grep -v '^#')
+      elif which age-plugin-fido2-hmac >/dev/null 2>&1; then
+        echo "Found age-plugin-fido2-hmac. Running enrollment..."
+        hardware_setup=$(age-plugin-fido2-hmac --enroll)
+        if [[ $? -ne 0 ]]; then
+          echo "Error: age-plugin-fido2-hmac failed." >&2
+          exit 1
+        fi
+        hw_recipient=$(echo "$hardware_setup" | grep -o 'age1fido2[a-z0-9]*')
+        hw_identity=$(echo "$hardware_setup" | grep -v '^#')
+      else
+        echo "Error: No passkey plugin found (age-plugin-yubikey or age-plugin-fido2-hmac)." >&2
+        exit 1
+      fi
+
+      if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
+        echo "Error: Failed to obtain hardware key information." >&2
+        exit 1
+      fi
+
+      echo "Encrypting post-quantum private key using passkey recipient..."
+      echo "$secretkey" | age -r "$hw_recipient" -o "${key_base}.key"
+      if [[ $? -ne 0 ]]; then
+        echo "Error: Private key encryption with passkey failed." >&2
+        exit 1
+      fi
+
+      # Save the hardware identity reference
+      echo "$hw_identity" > "${key_base}.passkey"
+      # Save the plaintext public key
+      echo "$pubkey" > "${key_base}.pub"
+
+      echo "Keys successfully created:"
+      echo "  Private key (passkey-encrypted): ${key_base}.key"
+      echo "  Passkey identity reference: ${key_base}.passkey"
+      echo "  Public key: ${key_base}.pub"
+    fi
+    ;;
+
+  encrypt)
+    shift
+    key_path=""
+    input_path=""
+    output_folder=""
+
+    if [[ $# -ge 1 ]]; then key_path="$1"; fi
+    if [[ $# -ge 2 ]]; then input_path="$2"; fi
+    if [[ $# -ge 3 ]]; then output_folder="$3"; fi
+
+    # Prompts for missing args
+    if [[ -z "$key_path" ]]; then
+      read -p "Enter public key file path (.pub): " key_path
+    fi
+    if [[ ! -f "$key_path" ]]; then
+      if [[ -f "${key_path}.pub" ]]; then
+        key_path="${key_path}.pub"
+      else
+        echo "Error: Public key file '$key_path' not found." >&2
+        exit 1
+      fi
+    fi
+
+    if [[ -z "$input_path" ]]; then
+      read -p "Enter input folder or file path: " input_path
+    fi
+    if [[ ! -e "$input_path" ]]; then
+      echo "Error: Input path '$input_path' does not exist." >&2
+      exit 1
+    fi
+
+    if [[ -z "$output_folder" ]]; then
+      read -p "Enter output folder path: " output_folder
+    fi
+    mkdir -p "$output_folder"
+
+    # Set names and paths
+    key_name=$(basename "$key_path" .pub)
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    backup_dir="${output_folder}/${timestamp}-${key_name}.vwbk"
+    mkdir -p "$backup_dir"
+
+    meta_file="${backup_dir}/meta.txt"
+    cat <<EOF > "$meta_file"
+vwbk_version: ${VERSION}
+key_name: ${key_name}
+timestamp: ${timestamp}
+original_path: $(realpath "$input_path")
+EOF
+
+    # Check if folder or file
+    if [[ -d "$input_path" ]]; then
+      echo "input_type: folder" >> "$meta_file"
+      parent_dir=$(dirname "$(realpath "$input_path")")
+      base_dir=$(basename "$(realpath "$input_path")")
+      tar -czf - -C "$parent_dir" "$base_dir" | age -r "$(cat "$key_path")" -o "${backup_dir}/data.tar.gz.age"
+    else
+      echo "input_type: file" >> "$meta_file"
+      parent_dir=$(dirname "$(realpath "$input_path")")
+      base_file=$(basename "$(realpath "$input_path")")
+      tar -czf - -C "$parent_dir" "$base_file" | age -r "$(cat "$key_path")" -o "${backup_dir}/data.tar.gz.age"
+    fi
+
+    if [[ ${PIPESTATUS[0]} -eq 0 && ${PIPESTATUS[1]} -eq 0 ]]; then
+      echo "Backup successfully created at: $backup_dir"
+    else
+      echo "Error: Encryption or archiving failed." >&2
+      rm -rf "$backup_dir"
+      exit 1
+    fi
+    ;;
+
+  decrypt)
+    shift
+    key_path=""
+    input_path=""
+    output_folder=""
+
+    if [[ $# -ge 1 ]]; then key_path="$1"; fi
+    if [[ $# -ge 2 ]]; then input_path="$2"; fi
+    if [[ $# -ge 3 ]]; then output_folder="$3"; fi
+
+    if [[ -z "$key_path" ]]; then
+      read -p "Enter private key file path (.key): " key_path
+    fi
+    if [[ ! -f "$key_path" ]]; then
+      if [[ -f "${key_path}.key" ]]; then
+        key_path="${key_path}.key"
+      else
+        echo "Error: Private key file '$key_path' not found." >&2
+        exit 1
+      fi
+    fi
+
+    if [[ -z "$input_path" ]]; then
+      read -p "Enter path to backup folder (.vwbk): " input_path
+    fi
+    if [[ ! -d "$input_path" ]]; then
+      if [[ -f "$input_path" && "$(basename "$(dirname "$input_path")")" == *.vwbk ]]; then
+        input_path=$(dirname "$input_path")
+      else
+        echo "Error: Input path '$input_path' is not a valid .vwbk folder." >&2
+        exit 1
+      fi
+    fi
+
+    if [[ -z "$output_folder" ]]; then
+      read -p "Enter destination output folder: " output_folder
+    fi
+    mkdir -p "$output_folder"
+
+    # Check for companion passkey
+    passkey_path="${key_path%.key}.passkey"
+
+    if [[ -f "$passkey_path" ]]; then
+      echo "Decrypting post-quantum key with passkey identity..."
+      decrypted_key=$(age -d -i "$passkey_path" "$key_path" 2>/dev/null)
+      if [[ $? -ne 0 ]]; then
+        echo "Error: Failed to decrypt post-quantum key with passkey plugin." >&2
+        exit 1
+      fi
+      echo "$decrypted_key" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+    else
+      echo "Decrypting backup with password-encrypted private key..."
+      age -d -i "$key_path" -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+    fi
+
+    if [[ ${PIPESTATUS[0]} -eq 0 && ${PIPESTATUS[1]} -eq 0 ]]; then
+      echo "Backup successfully decrypted to: $output_folder"
+      cp "${input_path}/meta.txt" "${output_folder}/vwbk-meta.txt"
+    else
+      echo "Error: Decryption or extraction failed." >&2
+      exit 1
+    fi
+    ;;
+
+  inspect)
+    shift
+    backup_path=""
+    if [[ $# -ge 1 ]]; then backup_path="$1"; fi
+
+    if [[ -z "$backup_path" ]]; then
+      read -p "Enter backup folder path (.vwbk): " backup_path
+    fi
+
+    if [[ ! -d "$backup_path" ]]; then
+      echo "Error: Backup path '$backup_path' is not a directory." >&2
+      exit 1
+    fi
+
+    meta_file="${backup_path}/meta.txt"
+    if [[ ! -f "$meta_file" ]]; then
+      echo "Error: No meta.txt found in '$backup_path'." >&2
+      exit 1
+    fi
+
+    echo "=== VWBK Backup Metadata ==="
+    cat "$meta_file"
+    echo "============================"
+    ;;
+
+  help)
+    show_help
+    ;;
+
+  *)
+    echo "Error: Unknown subcommand '$subcommand'." >&2
+    show_help
+    exit 1
+    ;;
+esac

@@ -1,0 +1,36 @@
+name: Release (GitHub)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-github-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Replace Version String
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Bumping version in files to: $TAG_NAME"
+          sed -i "s/VWBK_VERSION=\"DEV\"/VWBK_VERSION=\"$TAG_NAME\"/g" install.sh
+          sed -i "s/VERSION=\"DEV\"/VERSION=\"$TAG_NAME\"/g" vwbk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            vwbk
+            install.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
