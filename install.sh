@@ -17,6 +17,12 @@ APK_BASH="5.2.26-r0"
 APK_TAR="1.35-r2"
 APK_GZIP="1.13-r0"
 
+# Fedora targets
+FEDORA_BASH="5.3.9-3.fc44"
+FEDORA_TAR="1.35-8.fc44"
+FEDORA_GZIP="1.14-2.fc44"
+FEDORA_CURL="8.18.0-6.fc44"
+
 echo "=== vwbk ${VWBK_VERSION} Installer ==="
 
 # 1. OS Detection
@@ -65,12 +71,25 @@ install_alpine_deps() {
   fi
 }
 
+install_fedora_deps() {
+  echo "Detected Fedora system."
+  echo "Installing system dependencies (pinned where possible)..."
+  # Attempt pinned install, fallback if package version was updated in repo
+  if ! run_cmd dnf install -y bash-"${FEDORA_BASH}" tar-"${FEDORA_TAR}" gzip-"${FEDORA_GZIP}" curl-"${FEDORA_CURL}"; then
+    echo "Warning: Pinned Fedora package versions failed. Installing latest available..."
+    run_cmd dnf install -y bash tar gzip curl
+  fi
+}
+
 case "$OS_ID" in
   debian|ubuntu|raspbian)
     install_debian_deps
     ;;
   alpine)
     install_alpine_deps
+    ;;
+  fedora)
+    install_fedora_deps
     ;;
   *)
     echo "Warning: Unsupported OS '$OS_ID'. Please ensure bash, tar, gzip, and curl are installed manually."

@@ -17,7 +17,7 @@ To guarantee future readability, backups are structured as directories containin
 
 ## Installation & Updates
 
-The installer automatically detects Debian-based and Alpine-based systems, installs version-pinned dependencies, downloads the official pre-built `age` v1.3.1 binaries if system repos are outdated, and copies the `vwbk` script to the local PATH.
+The installer automatically detects Debian-based, Alpine-based, and Fedora-based systems, installs version-pinned dependencies, downloads the official pre-built `age` v1.3.1 binaries if system repos are outdated, and copies the `vwbk` script to the local PATH.
 
 To install the latest release, run:
 ```bash
