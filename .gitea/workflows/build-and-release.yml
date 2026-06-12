@@ -56,14 +56,9 @@ jobs:
           sed -i "s/VERSION=\"DEV\"/VERSION=\"$TAG_NAME\"/g" vwbk
 
       - name: Create Gitea Release
-        uses: softprops/action-gh-release@v2
+        uses: https://gitea.com/actions/release-action@main
         with:
-          name: Release ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
+          files: |-
             vwbk
             install.sh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          api_key: ${{ secrets.GITHUB_TOKEN }}
