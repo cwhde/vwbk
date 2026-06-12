@@ -351,13 +351,20 @@ EOF
     if [[ -z "$input_path" ]]; then
       read -p "Enter path to backup folder (.vwbk): " input_path </dev/tty
     fi
-    if [[ ! -d "$input_path" ]]; then
-      if [[ -f "$input_path" && "$(basename "$(dirname "$input_path")")" == *.vwbk ]]; then
-        input_path=$(dirname "$input_path")
-      else
-        echo "Error: Input path '$input_path' is not a valid .vwbk folder." >&2
-        exit 1
+    # If it's a file inside a .vwbk folder, use the parent
+    if [[ ! -d "$input_path" && -f "$input_path" ]]; then
+      parent="$(dirname "$input_path")"
+      if [[ "$(basename "$parent")" == *.vwbk ]]; then
+        input_path="$parent"
       fi
+    fi
+    if [[ ! -d "$input_path" ]]; then
+      echo "Error: Input path '$input_path' is not a directory." >&2
+      exit 1
+    fi
+    if [[ ! -f "${input_path}/data.tar.gz.age" ]]; then
+      echo "Error: '$input_path' is not a valid .vwbk folder (missing data.tar.gz.age)." >&2
+      exit 1
     fi
 
     # Prompt for output folder

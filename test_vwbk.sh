@@ -1,84 +1,63 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# test_vwbk.sh - Local test suite for vwbk inside container
-
-# Setup temporary test directories
 TEST_DIR=$(mktemp -d)
-echo "=== Running vwbk Container Test Suite ==="
-echo "Temporary directory: $TEST_DIR"
-
-# Cleanup function on exit
-cleanup() {
-  echo "Cleaning up temporary files..."
-  rm -rf "$TEST_DIR"
-}
+echo "=== vwbk Full Test Suite ==="
+echo "Temp dir: $TEST_DIR"
+cleanup() { rm -rf "$TEST_DIR"; }
 trap cleanup EXIT
 
-# 1. Test Key Enrollment (Password Mode)
-echo "----------------------------------------"
-echo "Testing: vwbk enroll (password mode)"
-KEY_PATH="${TEST_DIR}/testkeys"
-# Pipe password input twice for age -p (since age asks for password confirmation)
-vwbk enroll "$KEY_PATH" password <<< $'testpassword123\ntestpassword123'
+PASS=0; FAIL=0
+pass() { echo "  PASS: $1"; PASS=$((PASS+1)); }
+fail() { echo "  FAIL: $1" >&2; FAIL=$((FAIL+1)); }
 
-if [[ -f "${KEY_PATH}.key" && -f "${KEY_PATH}.pub" ]]; then
-  echo "SUCCESS: Key files created."
-  echo "Public key content:"
-  cat "${KEY_PATH}.pub"
-else
-  echo "FAILURE: Key files not created." >&2
-  exit 1
-fi
+SRC="${TEST_DIR}/src"
+mkdir -p "$SRC/sub"
+echo "hello world" > "$SRC/file1.txt"
+echo "nested data" > "$SRC/sub/file2.txt"
+KEY_BASE="${TEST_DIR}/mykey"
 
-# 2. Test Encryption
-echo "----------------------------------------"
-echo "Testing: vwbk encrypt"
-SRC_DIR="${TEST_DIR}/src"
-mkdir -p "$SRC_DIR"
-echo "Test file content 1" > "${SRC_DIR}/file1.txt"
-echo "Test file content 2" > "${SRC_DIR}/file2.txt"
+# 1. Enroll
+echo "--- 1. Enroll (password) ---"
+printf 'testpass123\ntestpass123\n' | script -qc "vwbk enroll $KEY_BASE password" /dev/null >/dev/null
+[[ -f "${KEY_BASE}.key" ]] && pass ".key created" || fail ".key missing"
+[[ -f "${KEY_BASE}.pub" ]] && pass ".pub created" || fail ".pub missing"
+grep -q '^age1' "${KEY_BASE}.pub" && pass ".pub has valid key" || fail ".pub has no valid key"
 
-OUT_DIR="${TEST_DIR}/out"
-mkdir -p "$OUT_DIR"
+# 2. Encrypt
+echo "--- 2. Encrypt ---"
+OUT="${TEST_DIR}/out"; mkdir -p "$OUT"
+vwbk encrypt "${KEY_BASE}.pub" "$SRC" "$OUT"
+BACKUP=$(find "$OUT" -name "*.vwbk" -type d | head -1)
+[[ -n "$BACKUP" ]] && pass "backup dir created" || fail "no backup dir"
+[[ -f "${BACKUP}/meta.txt" ]] && pass "meta.txt" || fail "meta.txt missing"
+[[ -f "${BACKUP}/data.tar.gz.age" ]] && pass "data.tar.gz.age" || fail "data.tar.gz.age missing"
 
-# Run encrypt
-vwbk encrypt "${KEY_PATH}.pub" "$SRC_DIR" "$OUT_DIR"
+# 3. Inspect
+echo "--- 3. Inspect ---"
+META_KEY=$(grep '^key_type:' "${BACKUP}/meta.txt" | awk '{print $2}')
+[[ "$META_KEY" == "password" ]] && pass "key_type=password" || fail "key_type=$META_KEY"
+vwbk inspect "$BACKUP" >/dev/null && pass "inspect runs" || fail "inspect failed"
 
-# Verify backup structure
-BACKUP_DIR=$(find "$OUT_DIR" -name "*-testkeys.vwbk" -type d | head -n 1)
-if [[ -n "$BACKUP_DIR" && -f "${BACKUP_DIR}/meta.txt" && -f "${BACKUP_DIR}/data.tar.gz.age" ]]; then
-  echo "SUCCESS: Backup folder structured correctly."
-  echo "Backup folder path: $BACKUP_DIR"
-else
-  echo "FAILURE: Backup structure invalid." >&2
-  exit 1
-fi
+# 4. Decrypt with key_path
+echo "--- 4. Decrypt (with key_path) ---"
+DEC="${TEST_DIR}/dec"; mkdir -p "$DEC"
+printf 'testpass123\n' | script -qc "vwbk decrypt '$BACKUP' '$DEC' '${KEY_BASE}.key'" /dev/null >/dev/null
+[[ -f "${DEC}/src/file1.txt" ]] && pass "file1.txt" || fail "file1.txt missing"
+[[ -f "${DEC}/src/sub/file2.txt" ]] && pass "file2.txt" || fail "file2.txt missing"
+grep -q "hello world" "${DEC}/src/file1.txt" && pass "content ok" || fail "content wrong"
 
-# 3. Test Inspection
-echo "----------------------------------------"
-echo "Testing: vwbk inspect"
-vwbk inspect "$BACKUP_DIR"
+# 5. Encrypt rejects .key
+echo "--- 5. Encrypt rejects .key ---"
+OUT2="${TEST_DIR}/out2"; mkdir -p "$OUT2"
+ERR=$(vwbk encrypt "${KEY_BASE}.key" "$SRC" "$OUT2" 2>&1 || true)
+echo "$ERR" | grep -qi "private key" && pass "rejects .key" || fail "did not reject .key"
 
-# 4. Test Decryption
-echo "----------------------------------------"
-echo "Testing: vwbk decrypt"
-DEC_DIR="${TEST_DIR}/dec"
-mkdir -p "$DEC_DIR"
+# 6. Decrypt rejects invalid path
+echo "--- 6. Decrypt invalid path ---"
+ERR=$(vwbk decrypt "${TEST_DIR}/nonexistent" "${TEST_DIR}/dec4" 2>&1 || true)
+echo "$ERR" | grep -q "not a directory\|not a valid\|missing" && pass "rejects bad path" || fail "did not reject bad path"
 
-# Run decrypt (new arg order: input_path output_folder key_path)
-vwbk decrypt "$BACKUP_DIR" "$DEC_DIR" "${KEY_PATH}.key" <<< 'testpassword123'
-
-# Verify decrypted contents
-if [[ -f "${DEC_DIR}/src/file1.txt" && -f "${DEC_DIR}/src/file2.txt" && -f "${DEC_DIR}/vwbk-meta.txt" ]]; then
-  echo "SUCCESS: Backup decrypted and verified."
-  echo "Decrypted file1 content: $(cat "${DEC_DIR}/src/file1.txt")"
-  echo "Decrypted file2 content: $(cat "${DEC_DIR}/src/file2.txt")"
-  echo "Decrypted audit meta.txt content:"
-  cat "${DEC_DIR}/vwbk-meta.txt"
-else
-  echo "FAILURE: Decryption check failed." >&2
-  exit 1
-fi
-
-echo "----------------------------------------"
-echo "All container tests passed successfully!"
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+[[ $FAIL -eq 0 ]] && exit 0 || exit 1

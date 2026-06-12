@@ -1,0 +1,12 @@
+FROM alpine:3.20.1
+
+RUN apk add --no-cache bash curl tar gzip util-linux
+
+WORKDIR /tmp/vwbk-install
+COPY install.sh vwbk ./
+RUN bash install.sh
+
+ENV PATH="/root/.local/bin:$PATH"
+
+COPY test_vwbk.sh /tmp/test_vwbk.sh
+COPY vwbk /root/.local/bin/vwbk
