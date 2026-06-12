@@ -115,7 +115,24 @@ case "$subcommand" in
         echo "Error: age-plugin-yubikey is not installed." >&2
         exit 1
       fi
-      echo "Running age-plugin-yubikey configuration (insert your YubiKey)..."
+      echo ""
+      echo "=== YubiKey Enrollment ==="
+      echo "The YubiKey wizard will walk you through these steps:"
+      echo "  1. Select your YubiKey (if multiple are plugged in)"
+      echo "  2. Select a slot for the age identity (Slot 1 / Empty is fine)"
+      echo "  3. Name the identity (optional, press Enter to skip)"
+      echo "  4. Select a PIN policy:"
+      echo "       - Always: PIN required every decryption (most secure)"
+      echo "       - Once:   PIN required once per session (recommended)"
+      echo "       - Never:  No PIN required"
+      echo "  5. Select a touch policy:"
+      echo "       - Always: Touch required every decryption (most secure)"
+      echo "       - Cached: Touch required, cached for 15 seconds (recommended)"
+      echo "       - Never:  No touch required"
+      echo "  6. Confirm to generate the identity"
+      echo ""
+      echo "Insert your YubiKey now."
+      echo ""
       # --generate prints identity to stdout (the interactive TUI writes to a file instead)
       hardware_setup=$(age-plugin-yubikey --generate)
       if [[ $? -ne 0 ]]; then
@@ -148,7 +165,23 @@ case "$subcommand" in
         echo "Error: age-plugin-fido2-hmac is not installed." >&2
         exit 1
       fi
-      echo "Running age-plugin-fido2-hmac enrollment (insert your FIDO2 key and touch it when prompted)..."
+      echo ""
+      echo "=== FIDO2 Enrollment ==="
+      echo "The FIDO2 wizard will walk you through these steps:"
+      echo "  1. Insert your FIDO2 security key when prompted"
+      echo "  2. Enter your PIN (if the key has one set)"
+      echo "  3. Touch your key when it blinks"
+      echo "  4. Require a PIN for decryption? [y/n]"
+      echo "       Recommended: y (adds PIN protection on top of physical key)"
+      echo "  5. Touch your key again"
+      echo "  6. Have a separate identity? [y/n]"
+      echo "       Recommended: y (better privacy, prevents linking backups)"
+      echo "       Note: Choosing 'n' is known to cause 'pin required' errors"
+      echo "             with some tokens. Choose 'y' for reliable operation."
+      echo "  7. Touch your key a final time"
+      echo ""
+      echo "Insert your FIDO2 key now."
+      echo ""
       # -g is the correct flag for generating a new recipient/identity
       hardware_setup=$(age-plugin-fido2-hmac -g)
       if [[ $? -ne 0 ]]; then
