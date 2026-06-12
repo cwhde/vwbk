@@ -15,7 +15,7 @@ To guarantee future readability, backups are structured as directories containin
 
 ---
 
-## Installation
+## Installation & Updates
 
 The installer automatically detects Debian-based and Alpine-based systems, installs version-pinned dependencies, downloads the official pre-built `age` v1.3.1 binaries if system repos are outdated, and copies the `vwbk` script to the local PATH.
 
@@ -28,6 +28,9 @@ To install from the master branch directly:
 ```bash
 curl -sSfL https://raw.githubusercontent.com/cwhde/vwbk/main/install.sh | bash
 ```
+
+### Updating
+To update `vwbk` to a newer version, simply re-run the installation command matching the version you wish to install. The installer will overwrite the existing `vwbk` and `age`/`age-keygen` binaries in your local path with the specified version, leaving your generated keys and backup configurations untouched.
 
 ---
 
