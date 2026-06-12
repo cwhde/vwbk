@@ -256,6 +256,17 @@ case "$subcommand" in
       fi
     fi
 
+    # Reject .key files — user probably meant the .pub file
+    if [[ "$key_path" == *.key ]]; then
+      base="${key_path%.key}"
+      if [[ -f "${base}.pub" ]]; then
+        echo "Error: '$key_path' is a private key file. Use '${base}.pub' instead." >&2
+      else
+        echo "Error: '$key_path' is a private key file. Encryption requires the public key (.pub)." >&2
+      fi
+      exit 1
+    fi
+
     if [[ -z "$input_path" ]]; then
       read -p "Enter input folder or file path: " input_path </dev/tty
     fi
@@ -275,11 +286,17 @@ case "$subcommand" in
     backup_dir="${output_folder}/${timestamp}-${key_name}.vwbk"
     mkdir -p "$backup_dir"
 
+    # Extract the actual public key (skip comment lines)
+    pubkey_line=$(grep '^age1' "$key_path")
+    if [[ -z "$pubkey_line" ]]; then
+      echo "Error: No public key found in '$key_path' (expected a line starting with 'age1')." >&2
+      exit 1
+    fi
+
     # Detect key type from public key prefix
-    pubkey_content=$(cat "$key_path")
-    if echo "$pubkey_content" | grep -q 'age1yubikey1'; then
+    if echo "$pubkey_line" | grep -q 'age1yubikey1'; then
       key_type="yubikey"
-    elif echo "$pubkey_content" | grep -q 'age1fido2'; then
+    elif echo "$pubkey_line" | grep -q 'age1fido2'; then
       key_type="fido2"
     else
       key_type="password"
@@ -299,12 +316,12 @@ EOF
       echo "input_type: folder" >> "$meta_file"
       parent_dir=$(dirname "$(realpath "$input_path")")
       base_dir=$(basename "$(realpath "$input_path")")
-      tar -czf - -C "$parent_dir" "$base_dir" | age -r "$(cat "$key_path")" -o "${backup_dir}/data.tar.gz.age"
+      tar -czf - -C "$parent_dir" "$base_dir" | age -r "$pubkey_line" -o "${backup_dir}/data.tar.gz.age"
     else
       echo "input_type: file" >> "$meta_file"
       parent_dir=$(dirname "$(realpath "$input_path")")
       base_file=$(basename "$(realpath "$input_path")")
-      tar -czf - -C "$parent_dir" "$base_file" | age -r "$(cat "$key_path")" -o "${backup_dir}/data.tar.gz.age"
+      tar -czf - -C "$parent_dir" "$base_file" | age -r "$pubkey_line" -o "${backup_dir}/data.tar.gz.age"
     fi
 
     if [[ ${PIPESTATUS[0]} -eq 0 && ${PIPESTATUS[1]} -eq 0 ]]; then
