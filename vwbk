@@ -10,8 +10,8 @@ vwbk ${VERSION} - Post-Quantum age Backup Utility
 
 Usage:
   vwbk enroll [filepath] [mode]
-    Create an age identity with a public and password/passkey-encrypted private key.
-    mode: password | passkey
+    Create an age identity with a public and encrypted private key.
+    mode: password | yubikey | fido2
 
   vwbk encrypt [key_path] [input_path] [output_folder]
     Tar, compress, and encrypt a file/folder with a public key.
@@ -46,7 +46,7 @@ case "$subcommand" in
 
     # Parse arguments
     for arg in "$@"; do
-      if [[ "$arg" == "password" || "$arg" == "passkey" ]]; then
+      if [[ "$arg" == "password" || "$arg" == "yubikey" || "$arg" == "fido2" ]]; then
         mode="$arg"
       else
         filepath="$arg"
@@ -73,11 +73,11 @@ case "$subcommand" in
 
     if [[ -z "$mode" ]]; then
       while true; do
-        read -p "Select enrollment mode (password/passkey): " mode
-        if [[ "$mode" == "password" || "$mode" == "passkey" ]]; then
+        read -p "Select enrollment mode (password/yubikey/fido2): " mode </dev/tty
+        if [[ "$mode" == "password" || "$mode" == "yubikey" || "$mode" == "fido2" ]]; then
           break
         fi
-        echo "Invalid mode. Please enter 'password' or 'passkey'."
+        echo "Invalid mode. Please enter 'password', 'yubikey', or 'fido2'."
       done
     fi
 
@@ -100,7 +100,6 @@ case "$subcommand" in
 
     if [[ "$mode" == "password" ]]; then
       echo "Encrypting private key with password..."
-      # age -p prompts interactively for passphrase double-entry
       echo "$secretkey" | age -p -o "${key_base}.key"
       if [[ $? -ne 0 ]]; then
         echo "Error: Encryption of private key failed." >&2
@@ -108,58 +107,72 @@ case "$subcommand" in
       fi
       echo "$pubkey" > "${key_base}.pub"
       echo "Keys successfully created:"
-      echo "  Private key (encrypted): ${key_base}.key"
+      echo "  Private key (password-encrypted): ${key_base}.key"
       echo "  Public key: ${key_base}.pub"
 
-    elif [[ "$mode" == "passkey" ]]; then
-      echo "Detecting passkey/security key plugin..."
-      hw_recipient=""
-      hw_identity=""
-
-      if which age-plugin-yubikey >/dev/null 2>&1; then
-        echo "Found age-plugin-yubikey. Running configuration..."
-        hardware_setup=$(age-plugin-yubikey)
-        if [[ $? -ne 0 ]]; then
-          echo "Error: age-plugin-yubikey failed." >&2
-          exit 1
-        fi
-        hw_recipient=$(echo "$hardware_setup" | grep -o 'age1yubikey1[a-z0-9]*')
-        hw_identity=$(echo "$hardware_setup" | grep -v '^#')
-      elif which age-plugin-fido2-hmac >/dev/null 2>&1; then
-        echo "Found age-plugin-fido2-hmac. Running enrollment..."
-        hardware_setup=$(age-plugin-fido2-hmac --enroll)
-        if [[ $? -ne 0 ]]; then
-          echo "Error: age-plugin-fido2-hmac failed." >&2
-          exit 1
-        fi
-        hw_recipient=$(echo "$hardware_setup" | grep -o 'age1fido2[a-z0-9]*')
-        hw_identity=$(echo "$hardware_setup" | grep -v '^#')
-      else
-        echo "Error: No passkey plugin found (age-plugin-yubikey or age-plugin-fido2-hmac)." >&2
+    elif [[ "$mode" == "yubikey" ]]; then
+      if ! which age-plugin-yubikey >/dev/null 2>&1; then
+        echo "Error: age-plugin-yubikey is not installed." >&2
         exit 1
       fi
-
+      echo "Running age-plugin-yubikey configuration (insert your YubiKey)..."
+      hardware_setup=$(age-plugin-yubikey)
+      if [[ $? -ne 0 ]]; then
+        echo "Error: age-plugin-yubikey failed." >&2
+        exit 1
+      fi
+      hw_recipient=$(echo "$hardware_setup" | grep -o 'age1yubikey1[a-z0-9]*')
+      hw_identity=$(echo "$hardware_setup" | grep -v '^#')
       if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
-        echo "Error: Failed to obtain hardware key information." >&2
+        echo "Error: Failed to obtain YubiKey recipient/identity." >&2
         exit 1
       fi
-
-      echo "Encrypting post-quantum private key using passkey recipient..."
+      echo "Encrypting post-quantum private key using YubiKey recipient..."
       echo "$secretkey" | age -r "$hw_recipient" -o "${key_base}.key"
       if [[ $? -ne 0 ]]; then
-        echo "Error: Private key encryption with passkey failed." >&2
+        echo "Error: Private key encryption with YubiKey failed." >&2
         exit 1
       fi
-
-      # Save the hardware identity reference
       echo "$hw_identity" > "${key_base}.passkey"
-      # Save the plaintext public key
       echo "$pubkey" > "${key_base}.pub"
-
       echo "Keys successfully created:"
-      echo "  Private key (passkey-encrypted): ${key_base}.key"
-      echo "  Passkey identity reference: ${key_base}.passkey"
+      echo "  Private key (YubiKey-encrypted): ${key_base}.key"
+      echo "  YubiKey identity reference: ${key_base}.passkey"
       echo "  Public key: ${key_base}.pub"
+
+    elif [[ "$mode" == "fido2" ]]; then
+      if ! which age-plugin-fido2-hmac >/dev/null 2>&1; then
+        echo "Error: age-plugin-fido2-hmac is not installed." >&2
+        exit 1
+      fi
+      echo "Running age-plugin-fido2-hmac enrollment (insert your FIDO2 key and touch it when prompted)..."
+      hardware_setup=$(age-plugin-fido2-hmac --enroll)
+      if [[ $? -ne 0 ]]; then
+        echo "Error: age-plugin-fido2-hmac failed." >&2
+        exit 1
+      fi
+      hw_recipient=$(echo "$hardware_setup" | grep -o 'age1fido2[a-z0-9]*')
+      hw_identity=$(echo "$hardware_setup" | grep -v '^#')
+      if [[ -z "$hw_recipient" || -z "$hw_identity" ]]; then
+        echo "Error: Failed to obtain FIDO2 recipient/identity." >&2
+        exit 1
+      fi
+      echo "Encrypting post-quantum private key using FIDO2 recipient..."
+      echo "$secretkey" | age -r "$hw_recipient" -o "${key_base}.key"
+      if [[ $? -ne 0 ]]; then
+        echo "Error: Private key encryption with FIDO2 key failed." >&2
+        exit 1
+      fi
+      echo "$hw_identity" > "${key_base}.passkey"
+      echo "$pubkey" > "${key_base}.pub"
+      echo "Keys successfully created:"
+      echo "  Private key (FIDO2-encrypted): ${key_base}.key"
+      echo "  FIDO2 identity reference: ${key_base}.passkey"
+      echo "  Public key: ${key_base}.pub"
+
+    else
+      echo "Error: Unknown mode '${mode}'. Use password, yubikey, or fido2." >&2
+      exit 1
     fi
     ;;
 
