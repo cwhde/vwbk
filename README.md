@@ -32,7 +32,15 @@ curl -sSfL https://git.juzo.io/juzo/vwbk/raw/branch/main/install.sh | bash
 ```
 
 ### Updating
-To update `vwbk` to a newer version, simply re-run the installation command with the desired version tag. The installer overwrites the existing `vwbk`, `age`, and plugin binaries in your local path, leaving your generated keys and backups untouched.
+To update `vwbk` to the latest release version, simply run:
+```bash
+vwbk update
+```
+You can also update to a specific version (e.g. `v1.7.9`) by specifying it:
+```bash
+vwbk update v1.7.9
+```
+Alternatively, you can re-run the installation command with the desired version tag.
 
 ---
 
@@ -41,18 +49,18 @@ To update `vwbk` to a newer version, simply re-run the installation command with
 All commands prompt interactively for any missing arguments if not supplied.
 
 ### 1. Key Enrollment (`vwbk enroll`)
-Creates an age identity: a public key and a protected private key.
+Creates a post-quantum age identity packaged in a single, unified key archive (`.vwbkey`). This contains your public key, encrypted private key, and optional passkey.
 
 ```bash
 vwbk enroll [filepath] [mode]
 ```
-- **`filepath`**: Optional. Base path for the output files (e.g. `./keys/mykey`).
-  - If it ends with `/` or is omitted, keys are saved inside that folder as `identity`.
-  - Produces `.key` (encrypted private key), `.pub` (public key), and `.passkey` (hardware token mode only).
+- **`filepath`**: Optional. Base path/filename for the output key archive (e.g. `./keys/mykey`).
+  - If it ends with `/` or is omitted, the archive is saved inside that folder as `identity.vwbkey`.
+  - Produces a single `.vwbkey` archive file (which is a tar archive of the public, private, and passkey elements).
 - **`mode`**: Optional. One of:
   - **`password`**: Prompts for a passphrase and encrypts the private key using `age -p`.
-  - **`yubikey`**: Runs `age-plugin-yubikey` interactively. Insert your YubiKey before running. Requires `age-plugin-yubikey` to be installed.
-  - **`fido2`**: Runs `age-plugin-fido2-hmac --enroll` interactively. Insert your FIDO2 security key and touch it when prompted. Requires `age-plugin-fido2-hmac` to be installed.
+  - **`yubikey`**: Runs `age-plugin-yubikey` interactively. Insert your YubiKey before running.
+  - **`fido2`**: Runs `age-plugin-fido2-hmac -g` interactively. Insert your FIDO2 security key and touch it when prompted.
 
 ### 2. Encryption (`vwbk encrypt`)
 Tars, compresses, and encrypts a folder or file.
@@ -60,45 +68,47 @@ Tars, compresses, and encrypts a folder or file.
 ```bash
 vwbk encrypt [key_path] [input_path] [output_folder]
 ```
-- **`key_path`**: Path to the public key file (`.pub`).
+- **`key_path`**: Path to the public key file (`.pub`) or unified key archive (`.vwbkey`).
 - **`input_path`**: Path to the folder or file to back up.
-- **`output_folder`**: Directory where the backup folder will be created.
+- **`output_folder`**: Directory where the backup file will be created.
 
 **Resulting structure:**
-```
-20260612_180000-mykey.vwbk/
-├── meta.txt           <-- Plaintext metadata (version, key name, key type, timestamp)
-└── data.tar.gz.age    <-- Encrypted backup payload
-```
-
-The `key_type` field in `meta.txt` records whether the backup was encrypted with `password`, `yubikey`, or `fido2` — used by `vwbk decrypt` to auto-select the correct decryption flow.
+A single `.vwbk` tar archive file is created: `${timestamp}-${key_name}.vwbk`.
+Inside the archive, the payload and metadata are packed together:
+* `meta.txt`: Plaintext metadata (version, key name, key type, timestamp, embedded key info).
+* `data.tar.gz.age`: Encrypted backup payload.
+* `identity.key` (Optional): Bundled private key file (encrypted, completely secure to distribute/store).
+* `identity.passkey` (Optional): Bundled passkey file.
 
 ### 3. Decryption (`vwbk decrypt`)
-Decrypts, decompresses, and extracts the backup.
+Decrypts, decompresses, and extracts the backup. Supports both the new `.vwbk` file-based archives and legacy `.vwbk` directory-based formats.
 
 ```bash
 vwbk decrypt [input_path] [output_folder] [key_path]
 ```
-- **`input_path`**: Path to the `.vwbk` backup folder.
+- **`input_path`**: Path to the `.vwbk` backup file or folder.
 - **`output_folder`**: Directory to extract the backup contents into.
-- **`key_path`**: Optional. Path to the private key file (`.key`).
-  - If provided, the **password** decryption flow is used directly.
-  - If omitted, `vwbk` reads `key_type` from `meta.txt` and selects the correct flow automatically. If `key_type` is absent, it prompts interactively:
-    ```
-    1) Password-encrypted key file (.key)
-    2) YubiKey hardware passkey
-    3) FIDO2 hardware passkey
-    ```
-
-For hardware token flows (`yubikey` / `fido2`), the `.passkey` identity file paired with the `.key` file is used. All interactive prompts (PIN entry, key touch) are routed through `/dev/tty` so they work correctly even when stdin is piped.
-
-This command also exports `vwbk-meta.txt` into the output folder for audit purposes.
+- **`key_path`**: Optional. Path to the private key file (`.key`) or unified key archive (`.vwbkey`).
+  - If a companion key (`identity.key`) was bundled inside the backup during encryption, you can **omit `key_path` entirely**. `vwbk` will automatically use the bundled key and prompt you for the passphrase or security key touch!
+  - If a custom `key_path` is provided, it will override the bundled key.
+  - If no key is found or provided, it will prompt you interactively to choose a key.
 
 ### 4. Inspection (`vwbk inspect`)
-Displays metadata from a backup directory without decrypting the data.
+Displays metadata from a backup file or directory without decrypting the data.
 
 ```bash
-vwbk inspect [backup_folder]
+vwbk inspect [backup_path]
+```
+
+### 5. Self-Updating (`vwbk update`)
+Updates the utility directly from the GitHub repository `cwhde/vwbk`.
+
+```bash
+# Update to latest version
+vwbk update
+
+# Update to a specific release tag
+vwbk update v1.7.9
 ```
 
 ---
