@@ -12,6 +12,9 @@ if [ $# -gt 0 ]; then
   exec "$@"
 fi
 
+# Ensure /encrypted directory exists (even if not bind-mounted)
+mkdir -p /encrypted
+
 # Defaults
 KEEP_LAST=${KEEP_LAST:-10}
 BACKUP_INTERVAL=${BACKUP_INTERVAL:-1440} # Default 24 hours (in minutes)
@@ -25,16 +28,40 @@ while true; do
   echo "--- Starting backup run: $(date) ---"
 
   # 1. Validation checks
-  if [[ ! -d /keys ]] || [[ -z "$(ls -A /keys 2>/dev/null)" ]]; then
-    echo "Warning: /keys directory is empty. No public keys found. Skipping backup run..."
+  # Gather all valid key files (.pub and .vwbkey)
+  key_files=()
+  if [[ -d /keys ]]; then
+    for f in /keys/*.pub /keys/*.vwbkey; do
+      if [[ -f "$f" ]]; then
+        key_files+=("$f")
+      fi
+    done
+  fi
+  num_keys=${#key_files[@]}
+
+  if [[ ! -d /keys ]] || (( num_keys == 0 )); then
+    echo "Warning: /keys directory is empty or contains no valid keys (.pub, .vwbkey). Skipping backup run..."
   elif [[ ! -d /encrypt ]] || [[ -z "$(ls -A /encrypt 2>/dev/null)" ]]; then
     echo "Warning: /encrypt directory is empty. Nothing to backup. Skipping backup run..."
   else
+    echo "Found ${num_keys} key(s) in /keys."
     # 2. Perform backups for each public key found in /keys
-    for key_file in /keys/*.pub; do
-      if [[ -f "$key_file" ]]; then
-        echo "Performing backup with key: $(basename "$key_file")"
-        vwbk encrypt "$key_file" /encrypt /encrypted
+    for key_file in "${key_files[@]}"; do
+      echo "Creating backup using key: $(basename "$key_file")..."
+      encrypt_output=$(vwbk encrypt "$key_file" /encrypt /encrypted 2>&1)
+      status=$?
+      if [[ $status -eq 0 ]]; then
+        # Find the created file path from output
+        backup_file=$(echo "$encrypt_output" | grep -o '/encrypted/[^ ]*\.vwbk')
+        if [[ -n "$backup_file" && -f "$backup_file" ]]; then
+          size=$(du -sh "$backup_file" | awk '{print $1}')
+          echo "Created backup for key '$(basename "$key_file")' (size $size)."
+        else
+          echo "Created backup for key '$(basename "$key_file")'."
+        fi
+      else
+        echo "Error: Encryption failed for key '$(basename "$key_file")'." >&2
+        echo "$encrypt_output" >&2
       fi
     done
 
@@ -91,10 +118,13 @@ while true; do
 
   # 4. Sync to rclone if config is provided
   if [[ -f /rclone_data/rclone.conf ]]; then
-    echo "found rclone configuration. syncing to remote 'main'..."
+    echo "Found rclone configuration. Syncing backups to remote 'main'..."
     rclone sync /encrypted main: --config /rclone_data/rclone.conf --delete-during
     if [[ $? -eq 0 ]]; then
       echo "rclone sync completed successfully."
+      echo "Checking remote storage..."
+      num_remote_backups=$(rclone lsf main: --config /rclone_data/rclone.conf --include "*.vwbk" 2>/dev/null | wc -l)
+      echo "Remote storage check: found $num_remote_backups backup(s) on remote."
     else
       echo "Error: rclone sync failed." >&2
     fi

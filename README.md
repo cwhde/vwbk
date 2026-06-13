@@ -119,8 +119,8 @@ A prebuilt Docker image is available to automate periodic backups. It handles en
 
 ### Directory Mapping
 - `/encrypt`: Mount the directory you want to back up here.
-- `/keys`: Mount the directory containing your public keys (`*.pub`). A backup is generated for every key found.
-- `/encrypted`: Mount your target backup directory here.
+- `/keys`: Mount the directory containing your public keys (`*.pub`) or unified key archives (`*.vwbkey`). A backup is generated for every key found.
+- `/encrypted` *(Optional)*: Mount your target backup directory here. If not mounted, this directory is automatically created inside the container so you can still sync backups using `rclone` without a local mount.
 - `/rclone_data` *(Optional)*: Mount a directory containing your `rclone.conf` here. If present, backups are synced to the remote named `main`.
 
 ### Docker Compose Example
@@ -142,6 +142,13 @@ services:
       - KEEP_LAST=10
       - BACKUP_INTERVAL=1440 # minutes (1440 = 24 hours)
 ```
+
+### Docker Image Version Pinning
+
+When deploying the Docker daemon, you can choose to use the `latest` tag or pin to a specific release version (e.g., `v1.7.15`).
+
+* **Pinning (Recommended for Production)**: Pinning to a specific version (e.g., `image: git.juzo.io/juzo/vwbk:v1.7.15`) prevents unexpected breaking changes during automated container updates. This ensures maximum stability and predictability.
+* **Using `latest`**: Using the `latest` tag (e.g., `image: git.juzo.io/juzo/vwbk:latest`) ensures you automatically get the latest security updates and features when you pull, but carries a risk of breaking changes if scripts or dependency structures change.
 
 ---
 
