@@ -766,7 +766,7 @@ EOF
     if [[ -z "$target_version" ]]; then
       echo "Fetching latest version from GitHub cwhde/vwbk..."
       latest_json=$(curl -sSfL https://api.github.com/repos/cwhde/vwbk/releases/latest 2>/dev/null)
-      target_version=$(echo "$latest_json" | grep -o '"tag_name":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+      target_version=$(echo "$latest_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | cut -d'"' -f4)
       if [[ -z "$target_version" ]]; then
         echo "Error: Could not retrieve latest version from GitHub." >&2
         exit 1

@@ -21,8 +21,8 @@ KEY_BASE="${TEST_DIR}/mykey"
 echo "--- 1. Enroll (password) ---"
 printf 'testpass123\ntestpass123\n' | script -qc "vwbk enroll $KEY_BASE password" /dev/null >/dev/null
 [[ -f "${KEY_BASE}.vwbkey" ]] && pass ".vwbkey created" || fail ".vwbkey missing"
-tar -tf "${KEY_BASE}.vwbkey" | grep -q 'key.pub' && pass "key.pub in .vwbkey" || { fail "key.pub missing in .vwbkey"; tar -tf "${KEY_BASE}.vwbkey"; }
-tar -tf "${KEY_BASE}.vwbkey" | grep -q 'key.key' && pass "key.key in .vwbkey" || { fail "key.key missing in .vwbkey"; tar -tf "${KEY_BASE}.vwbkey"; }
+tar -tf "${KEY_BASE}.vwbkey" | grep 'key.pub' >/dev/null && pass "key.pub in .vwbkey" || { fail "key.pub missing in .vwbkey"; tar -tf "${KEY_BASE}.vwbkey"; }
+tar -tf "${KEY_BASE}.vwbkey" | grep 'key.key' >/dev/null && pass "key.key in .vwbkey" || { fail "key.key missing in .vwbkey"; tar -tf "${KEY_BASE}.vwbkey"; }
 
 # Extract key.pub from tar to check if it contains the public key and comment
 tar -O -xf "${KEY_BASE}.vwbkey" ./key.pub 2>/dev/null | grep -q '^age1' && pass "key.pub has valid key" || fail "key.pub has no valid key"
@@ -34,9 +34,9 @@ OUT="${TEST_DIR}/out"; mkdir -p "$OUT"
 vwbk encrypt "${KEY_BASE}.vwbkey" "$SRC" "$OUT"
 BACKUP=$(find "$OUT" -name "*.vwbk" -type f | head -1)
 [[ -n "$BACKUP" ]] && pass "backup file created" || fail "no backup file"
-tar -tf "$BACKUP" | grep -q 'meta.txt' && pass "meta.txt in tar" || fail "meta.txt missing in tar"
-tar -tf "$BACKUP" | grep -q 'data.tar.gz.age' && pass "data.tar.gz.age in tar" || fail "data.tar.gz.age missing in tar"
-tar -tf "$BACKUP" | grep -q 'identity.key' && pass "identity.key embedded in tar" || fail "identity.key missing in tar"
+tar -tf "$BACKUP" | grep 'meta.txt' >/dev/null && pass "meta.txt in tar" || fail "meta.txt missing in tar"
+tar -tf "$BACKUP" | grep 'data.tar.gz.age' >/dev/null && pass "data.tar.gz.age in tar" || fail "data.tar.gz.age missing in tar"
+tar -tf "$BACKUP" | grep 'identity.key' >/dev/null && pass "identity.key embedded in tar" || fail "identity.key missing in tar"
 
 # 3. Inspect
 echo "--- 3. Inspect ---"
@@ -96,6 +96,26 @@ tar -czf - -C "$parent_dir" "$base_dir" | age -r "$(grep '^age1' "${EXTRACT_DIR}
 DEC_LEGACY="${TEST_DIR}/dec_legacy"; mkdir -p "$DEC_LEGACY"
 printf 'testpass123\n' | script -qc "vwbk decrypt '$LEGACY_DIR' '$DEC_LEGACY' '${EXTRACT_DIR}/key.key'" /dev/null >/dev/null
 [[ -f "${DEC_LEGACY}/src/file1.txt" ]] && pass "legacy file1.txt" || fail "legacy file1.txt missing"
+
+# 8. Self-Update Command
+echo "--- 8. Self-Update ---"
+TEST_UP_DIR="${TEST_DIR}/test_up"
+mkdir -p "$TEST_UP_DIR"
+cp "$(command -v vwbk || echo './vwbk')" "$TEST_UP_DIR/vwbk"
+# Update to a specific historical version to verify it succeeds and replaces the file
+if "$TEST_UP_DIR/vwbk" update v1.7.10 >/dev/null 2>&1; then
+  "$TEST_UP_DIR/vwbk" help | head -n 1 | grep 'v1.7.10' >/dev/null && pass "update command to specific version works" || fail "update failed to replace version"
+else
+  fail "update command to specific version failed to execute"
+fi
+# Reset the temp script back to our local version so we run the fixed update command again
+cp "$(command -v vwbk || echo './vwbk')" "$TEST_UP_DIR/vwbk"
+# Update to latest version from GitHub (should be v1.7.13)
+if "$TEST_UP_DIR/vwbk" update >/dev/null 2>&1; then
+  "$TEST_UP_DIR/vwbk" help | head -n 1 | grep 'v1.7.13' >/dev/null && pass "update command to latest works" || fail "update to latest failed to replace version"
+else
+  fail "update command to latest failed to execute"
+fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
