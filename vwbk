@@ -105,7 +105,10 @@ case "$subcommand" in
         echo "Error: Encryption of private key failed." >&2
         exit 1
       fi
-      echo "$pubkey" > "${key_base}.pub"
+      {
+        echo "# vwbk_key_type: password"
+        echo "$pubkey"
+      } > "${key_base}.pub"
       echo "Keys successfully created:"
       echo "  Private key (password-encrypted): ${key_base}.key"
       echo "  Public key: ${key_base}.pub"
@@ -154,7 +157,10 @@ case "$subcommand" in
         exit 1
       fi
       echo "$hw_identity" > "${key_base}.passkey"
-      echo "$pubkey" > "${key_base}.pub"
+      {
+        echo "# vwbk_key_type: yubikey"
+        echo "$pubkey"
+      } > "${key_base}.pub"
       echo "Keys successfully created:"
       echo "  Private key (YubiKey-encrypted): ${key_base}.key"
       echo "  YubiKey identity reference: ${key_base}.passkey"
@@ -211,7 +217,10 @@ case "$subcommand" in
         echo "Error: Private key encryption with FIDO2 key failed." >&2
         exit 1
       fi
-      echo "$pubkey" > "${key_base}.pub"
+      {
+        echo "# vwbk_key_type: fido2"
+        echo "$pubkey"
+      } > "${key_base}.pub"
       if [[ -n "$hw_identity" ]]; then
         echo "$hw_identity" > "${key_base}.passkey"
         echo "Keys successfully created:"
@@ -284,8 +293,6 @@ case "$subcommand" in
     # Set names and paths
     key_name=$(basename "$key_path" .pub)
     timestamp=$(date +%Y%m%d_%H%M%S)
-    backup_dir="${output_folder}/${timestamp}-${key_name}.vwbk"
-    mkdir -p "$backup_dir"
 
     # Extract the actual public key (skip comment lines)
     pubkey_line=$(grep '^age1' "$key_path")
@@ -294,18 +301,49 @@ case "$subcommand" in
       exit 1
     fi
 
-    # Detect key type from public key prefix or file contents
-    if echo "$pubkey_line" | grep -q 'age1yubikey1'; then
-      key_type="yubikey"
-    elif echo "$pubkey_line" | grep -q 'age1fido2'; then
-      key_type="fido2"
-    elif grep -q 'age-plugin-fido2-hmac' "$key_path"; then
-      key_type="fido2"
-    else
-      key_type="password"
+    # Detect key type
+    companion_key="${key_path%.pub}.key"
+    companion_passkey="${key_path%.pub}.passkey"
+    key_type=""
+
+    if [[ -f "$companion_key" ]]; then
+      # Try to detect by reading the first 10 lines of the age encrypted file
+      if head -n 10 "$companion_key" | grep -q 'fido2-hmac'; then
+        key_type="fido2"
+      elif head -n 10 "$companion_key" | grep -q 'yubikey'; then
+        key_type="yubikey"
+      elif head -n 10 "$companion_key" | grep -q 'scrypt'; then
+        key_type="password"
+      fi
     fi
 
-    meta_file="${backup_dir}/meta.txt"
+    if [[ -z "$key_type" ]]; then
+      if grep -q 'vwbk_key_type: yubikey' "$key_path"; then
+        key_type="yubikey"
+      elif grep -q 'vwbk_key_type: fido2' "$key_path"; then
+        key_type="fido2"
+      elif grep -q 'vwbk_key_type: password' "$key_path"; then
+        key_type="password"
+      fi
+    fi
+
+    if [[ -z "$key_type" ]]; then
+      if echo "$pubkey_line" | grep -q 'age1yubikey1'; then
+        key_type="yubikey"
+      elif echo "$pubkey_line" | grep -q 'age1fido2'; then
+        key_type="fido2"
+      elif grep -q 'age-plugin-fido2-hmac' "$key_path"; then
+        key_type="fido2"
+      else
+        key_type="password"
+      fi
+    fi
+
+    # Create temporary directory for backup packaging
+    backup_tmp_dir=$(mktemp -d)
+    meta_file="${backup_tmp_dir}/meta.txt"
+    data_file="${backup_tmp_dir}/data.tar.gz.age"
+
     cat <<EOF > "$meta_file"
 vwbk_version: ${VERSION}
 key_name: ${key_name}
@@ -314,26 +352,48 @@ timestamp: ${timestamp}
 original_path: $(realpath "$input_path")
 EOF
 
+    has_embedded_key="false"
+    if [[ -f "$companion_key" ]]; then
+      cp "$companion_key" "${backup_tmp_dir}/identity.key"
+      has_embedded_key="true"
+    fi
+    if [[ -f "$companion_passkey" ]]; then
+      cp "$companion_passkey" "${backup_tmp_dir}/identity.passkey"
+    fi
+    echo "has_embedded_key: ${has_embedded_key}" >> "$meta_file"
+
     # Check if folder or file
     if [[ -d "$input_path" ]]; then
       echo "input_type: folder" >> "$meta_file"
       parent_dir=$(dirname "$(realpath "$input_path")")
       base_dir=$(basename "$(realpath "$input_path")")
-      tar -czf - -C "$parent_dir" "$base_dir" | age -r "$pubkey_line" -o "${backup_dir}/data.tar.gz.age"
+      tar -czf - -C "$parent_dir" "$base_dir" | age -r "$pubkey_line" -o "$data_file"
+      encrypt_status=("${PIPESTATUS[@]}")
     else
       echo "input_type: file" >> "$meta_file"
       parent_dir=$(dirname "$(realpath "$input_path")")
       base_file=$(basename "$(realpath "$input_path")")
-      tar -czf - -C "$parent_dir" "$base_file" | age -r "$pubkey_line" -o "${backup_dir}/data.tar.gz.age"
+      tar -czf - -C "$parent_dir" "$base_file" | age -r "$pubkey_line" -o "$data_file"
+      encrypt_status=("${PIPESTATUS[@]}")
     fi
 
-    if [[ ${PIPESTATUS[0]} -eq 0 && ${PIPESTATUS[1]} -eq 0 ]]; then
-      echo "Backup successfully created at: $backup_dir"
+    if [[ ${encrypt_status[0]} -eq 0 && ${encrypt_status[1]} -eq 0 ]]; then
+      backup_file="${output_folder}/${timestamp}-${key_name}.vwbk"
+      tar -cf "$backup_file" -C "$backup_tmp_dir" .
+      if [[ $? -eq 0 ]]; then
+        echo "Backup successfully created at: $backup_file"
+      else
+        echo "Error: Failed to create tar archive." >&2
+        rm -f "$backup_file"
+        rm -rf "$backup_tmp_dir"
+        exit 1
+      fi
     else
       echo "Error: Encryption or archiving failed." >&2
-      rm -rf "$backup_dir"
+      rm -rf "$backup_tmp_dir"
       exit 1
     fi
+    rm -rf "$backup_tmp_dir"
     ;;
 
   decrypt)
@@ -349,28 +409,35 @@ EOF
 
     # Prompt for input backup path
     if [[ -z "$input_path" ]]; then
-      read -p "Enter path to backup folder (.vwbk): " input_path </dev/tty
+      read -p "Enter path to backup file (.vwbk): " input_path </dev/tty
     fi
     if [[ ! -e "$input_path" ]]; then
       echo "Error: Input path '$input_path' does not exist." >&2
       exit 1
     fi
-    # If it's a file inside a .vwbk folder, use the parent
-    if [[ -f "$input_path" ]]; then
-      parent="$(dirname "$input_path")"
-      if [[ "$(basename "$parent")" == *.vwbk ]]; then
-        input_path="$parent"
-      else
-        echo "Error: Input path '$input_path' is a file but not inside a .vwbk folder." >&2
+
+    # Determine if directory (old format) or file (new format)
+    temp_dir=""
+    is_temp_dir="false"
+
+    if [[ -d "$input_path" ]]; then
+      temp_dir="$input_path"
+    elif [[ -f "$input_path" ]]; then
+      temp_dir=$(mktemp -d)
+      is_temp_dir="true"
+      if ! tar -xf "$input_path" -C "$temp_dir" 2>/dev/null; then
+        echo "Error: Failed to extract backup archive '$input_path'." >&2
+        rm -rf "$temp_dir"
         exit 1
       fi
-    fi
-    if [[ ! -d "$input_path" ]]; then
-      echo "Error: Input path '$input_path' is not a directory." >&2
+    else
+      echo "Error: Input path '$input_path' is neither a file nor a directory." >&2
       exit 1
     fi
-    if [[ ! -f "${input_path}/data.tar.gz.age" ]]; then
-      echo "Error: '$input_path' is not a valid .vwbk folder (missing data.tar.gz.age)." >&2
+
+    if [[ ! -f "${temp_dir}/data.tar.gz.age" ]]; then
+      echo "Error: Backup is not a valid vwbk backup (missing data.tar.gz.age)." >&2
+      if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
       exit 1
     fi
 
@@ -380,15 +447,22 @@ EOF
     fi
     mkdir -p "$output_folder"
 
+    # If key_path is not specified, check if companion key is inside the backup
+    if [[ -z "$key_path" ]]; then
+      if [[ -f "${temp_dir}/identity.key" ]]; then
+        key_path="${temp_dir}/identity.key"
+      fi
+    fi
+
     # Determine decrypt mode: if key_path given, use password flow.
     # Otherwise, read key_type from meta.txt or ask interactively.
-    if [[ -n "$key_path" ]]; then
+    if [[ -n "$key_path" && "$key_path" != "${temp_dir}/identity.key" ]]; then
       decrypt_mode="password"
     else
       # Try to read key_type from meta.txt
       meta_key_type=""
-      if [[ -f "${input_path}/meta.txt" ]]; then
-        meta_key_type=$(grep '^key_type:' "${input_path}/meta.txt" | awk '{print $2}')
+      if [[ -f "${temp_dir}/meta.txt" ]]; then
+        meta_key_type=$(grep '^key_type:' "${temp_dir}/meta.txt" | awk '{print $2}')
       fi
 
       if [[ -n "$meta_key_type" ]]; then
@@ -423,17 +497,19 @@ EOF
             key_path="${key_path}.key"
           else
             echo "Error: Private key file '$key_path' not found." >&2
+            if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
             exit 1
           fi
         fi
         echo "Decrypting backup with password-encrypted private key..."
-        age -d -i "$key_path" -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        age -d -i "$key_path" -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         pipe_status=("${PIPESTATUS[@]}")
         ;;
 
       yubikey)
         if ! which age-plugin-yubikey >/dev/null 2>&1; then
           echo "Error: age-plugin-yubikey is not installed." >&2
+          if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
           exit 1
         fi
         if [[ -z "$key_path" ]]; then
@@ -441,26 +517,33 @@ EOF
         fi
         if [[ ! -f "$key_path" ]]; then
           echo "Error: Private key file '$key_path' not found." >&2
+          if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
           exit 1
         fi
         # Check for companion .passkey identity file
-        passkey_file="${key_path%.key}.passkey"
-        if [[ ! -f "$passkey_file" ]]; then
-          read -p "Enter YubiKey identity file path (.passkey): " passkey_file </dev/tty
+        if [[ "$key_path" == "${temp_dir}/identity.key" && -f "${temp_dir}/identity.passkey" ]]; then
+          passkey_file="${temp_dir}/identity.passkey"
+        else
+          passkey_file="${key_path%.key}.passkey"
+          if [[ ! -f "$passkey_file" ]]; then
+            read -p "Enter YubiKey identity file path (.passkey): " passkey_file </dev/tty
+          fi
         fi
         if [[ ! -f "$passkey_file" ]]; then
           echo "Error: YubiKey identity file '$passkey_file' not found." >&2
+          if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
           exit 1
         fi
         echo "Decrypting with YubiKey passkey (touch your key when prompted)..."
         # age-plugin-yubikey needs an interactive TTY; run age with /dev/tty as stdin
-        age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         pipe_status=("${PIPESTATUS[@]}")
         ;;
 
       fido2)
         if ! which age-plugin-fido2-hmac >/dev/null 2>&1; then
           echo "Error: age-plugin-fido2-hmac is not installed." >&2
+          if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
           exit 1
         fi
         if [[ -z "$key_path" ]]; then
@@ -468,32 +551,46 @@ EOF
         fi
         if [[ ! -f "$key_path" ]]; then
           echo "Error: Private key file '$key_path' not found." >&2
+          if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
           exit 1
         fi
-        passkey_file="${key_path%.key}.passkey"
+        
+        # Check for companion .passkey identity file
+        if [[ "$key_path" == "${temp_dir}/identity.key" && -f "${temp_dir}/identity.passkey" ]]; then
+          passkey_file="${temp_dir}/identity.passkey"
+        else
+          passkey_file="${key_path%.key}.passkey"
+        fi
+
         if [[ -f "$passkey_file" ]]; then
           echo "Decrypting with FIDO2 passkey (touch your security key when prompted)..."
-          age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+          age -d -i "$passkey_file" "$key_path" | age -d -i - -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         else
           echo "No .passkey file found. Decrypting with FIDO2 token directly..."
           echo "You will need to insert your FIDO2 key and touch it when prompted."
-          age -d -j fido2-hmac -o - "$key_path" | age -d -i - -o - "${input_path}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+          age -d -j fido2-hmac -o - "$key_path" | age -d -i - -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         fi
         pipe_status=("${PIPESTATUS[@]}")
         ;;
 
       *)
         echo "Error: Unknown decryption mode '${decrypt_mode}'." >&2
+        if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
         exit 1
         ;;
     esac
 
     if [[ ${pipe_status[0]} -eq 0 && ${pipe_status[1]} -eq 0 ]]; then
       echo "Backup successfully decrypted to: $output_folder"
-      cp "${input_path}/meta.txt" "${output_folder}/vwbk-meta.txt"
+      cp "${temp_dir}/meta.txt" "${output_folder}/vwbk-meta.txt"
     else
       echo "Error: Decryption or extraction failed." >&2
+      if [[ "$is_temp_dir" == "true" ]]; then rm -rf "$temp_dir"; fi
       exit 1
+    fi
+
+    if [[ "$is_temp_dir" == "true" ]]; then
+      rm -rf "$temp_dir"
     fi
     ;;
 
@@ -503,23 +600,36 @@ EOF
     if [[ $# -ge 1 ]]; then backup_path="$1"; fi
 
     if [[ -z "$backup_path" ]]; then
-      read -p "Enter backup folder path (.vwbk): " backup_path </dev/tty
+      read -p "Enter backup path (.vwbk): " backup_path </dev/tty
     fi
 
-    if [[ ! -d "$backup_path" ]]; then
-      echo "Error: Backup path '$backup_path' is not a directory." >&2
+    if [[ ! -e "$backup_path" ]]; then
+      echo "Error: Backup path '$backup_path' does not exist." >&2
       exit 1
     fi
 
-    meta_file="${backup_path}/meta.txt"
-    if [[ ! -f "$meta_file" ]]; then
-      echo "Error: No meta.txt found in '$backup_path'." >&2
+    if [[ -d "$backup_path" ]]; then
+      meta_file="${backup_path}/meta.txt"
+      if [[ ! -f "$meta_file" ]]; then
+        echo "Error: No meta.txt found in '$backup_path'." >&2
+        exit 1
+      fi
+      echo "=== VWBK Backup Metadata ==="
+      cat "$meta_file"
+      echo "============================"
+    elif [[ -f "$backup_path" ]]; then
+      meta_content=$(tar -O -xf "$backup_path" ./meta.txt 2>/dev/null || tar -O -xf "$backup_path" meta.txt 2>/dev/null)
+      if [[ -z "$meta_content" ]]; then
+        echo "Error: No meta.txt found in backup '$backup_path'." >&2
+        exit 1
+      fi
+      echo "=== VWBK Backup Metadata ==="
+      echo "$meta_content"
+      echo "============================"
+    else
+      echo "Error: Backup path '$backup_path' is neither a file nor a directory." >&2
       exit 1
     fi
-
-    echo "=== VWBK Backup Metadata ==="
-    cat "$meta_file"
-    echo "============================"
     ;;
 
   help)
