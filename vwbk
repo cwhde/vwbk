@@ -612,7 +612,7 @@ EOF
           fi
         fi
         echo "Decrypting backup with password-encrypted private key..."
-        age -d -i "$key_path" -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
+        age -d "$key_path" | age -d -i - -o - "${temp_dir}/data.tar.gz.age" | tar -xzf - -C "$output_folder"
         pipe_status=("${PIPESTATUS[@]}")
         ;;
 

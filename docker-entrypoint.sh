@@ -42,22 +42,30 @@ while true; do
     echo "Running backup rotation (keeping last ${KEEP_LAST} backups per key)..."
     declare -A backups_by_key
 
-    # Scan for .vwbk directories in /encrypted
-    for d in /encrypted/*.vwbk; do
-      if [[ -d "$d" ]]; then
+    # Scan for .vwbk files/directories in /encrypted
+    for item in /encrypted/*.vwbk; do
+      if [[ -e "$item" ]]; then
         key_name=""
-        if [[ -f "$d/meta.txt" ]]; then
-          key_name=$(grep "^key_name:" "$d/meta.txt" | cut -d' ' -f2)
+        if [[ -d "$item" ]]; then
+          if [[ -f "$item/meta.txt" ]]; then
+            key_name=$(grep "^key_name:" "$item/meta.txt" | cut -d' ' -f2)
+          fi
+        elif [[ -f "$item" ]]; then
+          meta_content=$(tar -O -xf "$item" ./meta.txt 2>/dev/null || tar -O -xf "$item" meta.txt 2>/dev/null)
+          if [[ -n "$meta_content" ]]; then
+            key_name=$(echo "$meta_content" | grep "^key_name:" | cut -d' ' -f2)
+          fi
         fi
-        # Fallback to directory name pattern if meta.txt key_name isn't found
+
+        # Fallback to name pattern if meta.txt key_name isn't found
         if [[ -z "$key_name" ]]; then
-          base_dir=$(basename "$d")
-          key_name="${base_dir#*-}"
+          base_name=$(basename "$item")
+          key_name="${base_name#*-}"
           key_name="${key_name%.vwbk}"
         fi
 
         if [[ -n "$key_name" ]]; then
-          backups_by_key["$key_name"]="${backups_by_key["$key_name"]}"$'\n'"$d"
+          backups_by_key["$key_name"]="${backups_by_key["$key_name"]}"$'\n'"$item"
         fi
       fi
     done
@@ -69,10 +77,10 @@ while true; do
       if (( count > KEEP_LAST )); then
         to_delete_count=$(( count - KEEP_LAST ))
         echo "Key '$key' has $count backups. Deleting oldest $to_delete_count..."
-        echo "$sorted_backups" | head -n "$to_delete_count" | while read -r del_dir; do
-          if [[ -d "$del_dir" ]]; then
-            echo "Deleting old backup: $del_dir"
-            rm -rf "$del_dir"
+        echo "$sorted_backups" | head -n "$to_delete_count" | while read -r del_item; do
+          if [[ -e "$del_item" ]]; then
+            echo "Deleting old backup: $del_item"
+            rm -rf "$del_item"
           fi
         done
       else
