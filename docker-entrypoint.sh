@@ -90,9 +90,9 @@ while true; do
   fi
 
   # 4. Sync to rclone if config is provided
-  if [[ -f /rclone.conf ]]; then
-    echo "Found rclone configuration at /rclone.conf. Syncing to remote 'main'..."
-    rclone sync /encrypted main: --config /rclone.conf --delete-during
+  if [[ -f /rclone_data/rclone.conf ]]; then
+    echo "found rclone configuration. syncing to remote 'main'..."
+    rclone sync /encrypted main: --config /rclone_data/rclone.conf --delete-during
     if [[ $? -eq 0 ]]; then
       echo "rclone sync completed successfully."
     else

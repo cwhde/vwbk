@@ -121,7 +121,7 @@ A prebuilt Docker image is available to automate periodic backups. It handles en
 - `/encrypt`: Mount the directory you want to back up here.
 - `/keys`: Mount the directory containing your public keys (`*.pub`). A backup is generated for every key found.
 - `/encrypted`: Mount your target backup directory here.
-- `/rclone.conf` *(Optional)*: Mount your `rclone.conf` here. If present, backups are synced to the remote named `main`.
+- `/rclone_data` *(Optional)*: Mount a directory containing your `rclone.conf` here. If present, backups are synced to the remote named `main`.
 
 ### Docker Compose Example
 ```yaml
@@ -136,8 +136,8 @@ services:
       - /path/to/data:/encrypt:ro
       - /path/to/public_keys:/keys:ro
       - /path/to/backups:/encrypted
-      # Optional rclone config
-      - /path/to/rclone.conf:/rclone.conf:ro
+      # Optional rclone config directory (must be writable for token rotation)
+      - /path/to/rclone_data:/rclone_data
     environment:
       - KEEP_LAST=10
       - BACKUP_INTERVAL=1440 # minutes (1440 = 24 hours)
